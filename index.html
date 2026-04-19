@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#3B82F6">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="description" content="Track your transit route timing and stay on schedule">
+    <title>Transit Timer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        * { -webkit-tap-highlight-color: transparent; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        
+        function App() {
+            const [routes, setRoutes] = useState([]);
+            const [history, setHistory] = useState([]);
+            const [active, setActive] = useState(null);
+            const [view, setView] = useState('routes'); // routes, history, creating
+            const [historyDetail, setHistoryDetail] = useState(null);
+            const [creating, setCreating] = useState(false);
+            const [editing, setEditing] = useState(null);
+            const [name, setName] = useState('');
+            const [startPoint, setStartPoint] = useState('');
+            const [cps, setCps] = useState([{name:'', type:'fixed', time:600, dist:5, rate:2}]);
+            const [start, setStart] = useState(null);
+            const [curr, setCurr] = useState(0);
+            const [cpTimes, setCpTimes] = useState([]);
+            const [paused, setPaused] = useState(false);
+            const [pauseTotal, setPauseTotal] = useState(0);
+            const [pauseStart, setPauseStart] = useState(null);
+            const [now, setNow] = useState(Date.now());
+
+            useEffect(() => {
+                const s = localStorage.getItem('routes');
+                if(s) setRoutes(JSON.parse(s));
+                const h = localStorage.getItem('history');
+                if(h) setHistory(JSON.parse(h));
+            }, []);
+
+            useEffect(() => {
+                if(active && !paused) {
+                    const i = setInterval(() => setNow(Date.now()), 100);
+                    return () => clearInterval(i);
+                }
+            }, [active, paused]);
+
+            const save = r => { setRoutes(r); localStorage.setItem('routes', JSON.stringify(r)); };
+            const saveHistory = h => { setHistory(h); localStorage.setItem('history', JSON.stringify(h)); };
+            
+            const backupToSheets = () => {
+                const data = {
+                    routes,
+                    history,
+                    timestamp: new Date().toISOString()
+                };
+                const jsonStr = JSON.stringify(data, null, 2);
+                const blob = new Blob([jsonStr], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `transit-timer-backup-${new Date().toISOString().split('T')[0]}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+                alert('Backup downloaded! Upload this file to your Google Drive, then use Google Sheets to import it.');
+            };
+
+            const restoreFromSheets = () => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = '.json';
+                input.onchange = e => {
+                    const file = e.target.files[0];
+                    if(!file) return;
+                    const reader = new FileReader();
+                    reader.onload = event => {
+                        try {
+                            const data = JSON.parse(event.target.result);
+                            if(data.routes && Array.isArray(data.routes)) {
+                                if(confirm(`Restore ${data.routes.length} routes and ${data.history?.length || 0} history entries? This will merge with existing data.`)) {
+                                    const mergedRoutes = [...routes];
+                                    data.routes.forEach(r => {
+                                        if(!mergedRoutes.find(x => x.id === r.id)) {
+                                            mergedRoutes.push(r);
+                                        }
+                                    });
+                                    save(mergedRoutes);
+                                    
+                                    if(data.history && Array.isArray(data.history)) {
+                                        const mergedHistory = [...history];
+                                        data.history.forEach(h => {
+                                            if(!mergedHistory.find(x => x.id === h.id)) {
+                                                mergedHistory.push(h);
+                                            }
+                                        });
+                                        saveHistory(mergedHistory);
+                                    }
+                                    alert('Restore complete!');
+                                }
+                            } else {
+                                alert('Invalid backup file format');
+                            }
+                        } catch(err) {
+                            alert('Error reading backup file: ' + err.message);
+                        }
+                    };
+                    reader.readAsText(file);
+                };
+                input.click();
+            };
+            
+            const saveRoute = () => {
+                if(!name.trim() || cps.some(c => !c.name.trim())) return alert('Fill all fields');
+                const route = {
+                    id: editing?.id || Date.now(),
+                    name,
+                    startPoint,
+                    cps: cps.map(c => ({...c, exp: c.type === 'fixed' ? (c.time / 60) : (c.dist * c.rate)}))
+                };
+                save(editing ? routes.map(r => r.id === route.id ? route : r) : [...routes, route]);
+                setName(''); setStartPoint(''); setCps([{name:'', type:'fixed', time:10, dist:5, rate:2}]); setCreating(false); setEditing(null);
+            };
+
+            const startRoute = r => {
+                setActive(r); setStart(Date.now()); setCurr(0); setCpTimes([]);
+                setPaused(false); setPauseTotal(0); setPauseStart(null); setNow(Date.now());
+            };
+
+            const togglePause = () => {
+                if(paused) {
+                    setPauseTotal(pauseTotal + (Date.now() - pauseStart));
+                    setPauseStart(null); setPaused(false);
+                } else {
+                    setPauseStart(Date.now()); setPaused(true);
+                }
+            };
+
+            const reg = () => {
+                const t = (Date.now() - start - pauseTotal) / 60000;
+                setCpTimes([...cpTimes, {cp: curr, time: t, real: Date.now()}]);
+                if(curr < active.cps.length - 1) setCurr(curr + 1);
+            };
+
+            const stopRoute = () => {
+                if(cpTimes.length > 0) {
+                    const totalExp = active.cps.reduce((s, c) => s + c.exp, 0);
+                    const totalActual = (Date.now() - start - pauseTotal) / 60000;
+                    const totalKm = active.cps.reduce((s, c) => s + (c.dist || 0), 0);
+                    const onTime = cpTimes.filter(c => {
+                        let e = 0;
+                        for(let i = 0; i <= c.cp; i++) e += active.cps[i].exp;
+                        return Math.abs((c.time - e) * 60) < 10;
+                    }).length;
+                    const early = cpTimes.filter(c => {
+                        let e = 0;
+                        for(let i = 0; i <= c.cp; i++) e += active.cps[i].exp;
+                        return (c.time - e) * 60 < -10;
+                    }).length;
+                    const late = cpTimes.filter(c => {
+                        let e = 0;
+                        for(let i = 0; i <= c.cp; i++) e += active.cps[i].exp;
+                        return (c.time - e) * 60 > 10;
+                    }).length;
+
+                    const trip = {
+                        id: Date.now(),
+                        routeName: active.name,
+                        startPoint: active.startPoint || '',
+                        date: new Date().toLocaleDateString(),
+                        time: new Date().toLocaleTimeString(),
+                        checkpoints: cpTimes.map((ct, idx) => {
+                            const cp = active.cps[ct.cp];
+                            let exp = 0;
+                            for(let i = 0; i <= ct.cp; i++) exp += active.cps[i].exp;
+                            const diff = ct.time - exp;
+                            const diffSec = Math.abs(diff) * 60;
+                            
+                            // Calculate segment time and rate
+                            const prevTime = idx > 0 ? cpTimes[idx - 1].time : 0;
+                            const segmentTime = ct.time - prevTime;
+                            const segmentRate = cp.dist > 0 ? (segmentTime / cp.dist).toFixed(2) : 0;
+                            
+                            return {
+                                name: cp.name,
+                                expected: exp,
+                                actual: ct.time,
+                                realTime: ct.real,
+                                diff: diff,
+                                status: diffSec < 10 ? 'ok' : diff < 0 ? 'early' : 'late',
+                                km: cp.dist || 0,
+                                segmentTime: segmentTime,
+                                rate: segmentRate
+                            };
+                        }),
+                        stats: { onTime, early, late, total: cpTimes.length },
+                        duration: totalActual,
+                        totalKm: totalKm
+                    };
+                    saveHistory([trip, ...history]);
+                }
+                setActive(null);
+            };
+
+            const fmt = ms => {
+                const s = Math.floor(ms / 1000);
+                return `${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor((s%3600)/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+            };
+
+            const fmtTime = m => {
+                const h = Math.floor(Math.abs(m)/60), mn = Math.floor(Math.abs(m)%60), s = Math.floor((Math.abs(m)%1)*60);
+                return h > 0 ? `${String(h).padStart(2,'0')}:${String(mn).padStart(2,'0')}:${String(s).padStart(2,'0')}` : `${String(mn).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+            };
+
+            const fmtReal = ms => {
+                const d = new Date(ms);
+                return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+            };
+
+            const fmtRel = m => {
+                const h = Math.floor(m/60), mn = Math.floor(m%60), s = Math.floor((m%1)*60);
+                return h > 0 ? `${String(h).padStart(2,'0')}:${String(mn).padStart(2,'0')}:${String(s).padStart(2,'0')}` : `${String(mn).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+            };
+
+            const getExp = i => {
+                let e = 0;
+                for(let j = 0; j <= i; j++) e += active.cps[j].exp;
+                const pt = paused ? pauseTotal + (Date.now() - pauseStart) : pauseTotal;
+                return fmtReal(start + e * 60000 + pt);
+            };
+
+            const getStat = i => {
+                const rec = cpTimes.find(c => c.cp === i);
+                if(!rec) return null;
+                let e = 0;
+                for(let j = 0; j <= i; j++) e += active.cps[j].exp;
+                const d = rec.time - e;
+                const diffInSeconds = Math.abs(d) * 60;
+                return {
+                    diff: Math.abs(d), 
+                    diffSeconds: diffInSeconds,
+                    stat: diffInSeconds < 10 ? 'ok' : d < 0 ? 'early' : 'late'
+                };
+            };
+
+            const ProgressBar = () => {
+                const totalExp = active.cps.reduce((s, c) => s + c.exp, 0);
+                const elapsed = (now - start - pauseTotal) / 60000;
+                const timeProgress = Math.min((elapsed / totalExp) * 100, 100);
+                
+                let cumulative = 0;
+                const segments = active.cps.map((c, i) => {
+                    const segmentStart = cumulative;
+                    cumulative += c.exp;
+                    const segmentEnd = cumulative;
+                    const startPercent = (segmentStart / totalExp) * 100;
+                    const endPercent = (segmentEnd / totalExp) * 100;
+                    const width = endPercent - startPercent;
+                    
+                    const rec = cpTimes.find(t => t.cp === i);
+                    let overlayColor = null;
+                    let overlayStart = startPercent;
+                    let overlayEnd = endPercent;
+                    
+                    if (rec) {
+                        // Calculate where the circle was when registered
+                        const actualPercent = (rec.time / totalExp) * 100;
+                        
+                        // Expected position for this checkpoint
+                        let e = 0;
+                        for (let j = 0; j <= i; j++) e += active.cps[j].exp;
+                        const expectedPercent = (e / totalExp) * 100;
+                        
+                        const diffInSeconds = Math.abs(rec.time - e) * 60;
+                        
+                        // Determine color based on timing
+                        if (diffInSeconds < 10) {
+                            overlayColor = 'bg-green-500';
+                        } else if (actualPercent < expectedPercent) {
+                            overlayColor = 'bg-blue-500'; // early - registered before expected
+                        } else {
+                            overlayColor = 'bg-red-500'; // late - registered after expected
+                        }
+                        
+                        // Overlay from registration point to checkpoint position
+                        if (actualPercent < expectedPercent) {
+                            // Early: color from where registered to expected checkpoint
+                            overlayStart = actualPercent;
+                            overlayEnd = expectedPercent;
+                        } else {
+                            // Late: color from expected checkpoint to where registered
+                            overlayStart = expectedPercent;
+                            overlayEnd = actualPercent;
+                        }
+                    }
+                    
+                    return { startPercent, endPercent, width, overlayColor, overlayStart, overlayEnd, rec, i };
+                });
+
+                return <div className="bg-white rounded-xl shadow-lg p-4 mb-4">
+                    <div className="relative h-3 bg-gray-300 rounded-full overflow-visible">
+                        {/* Color overlays for completed segments */}
+                        {segments.map((seg, i) => seg.overlayColor && (
+                            <div key={`overlay-${i}`} 
+                                className={`absolute top-0 h-full ${seg.overlayColor} rounded-full transition-all duration-300`}
+                                style={{
+                                    left: `${seg.overlayStart}%`, 
+                                    width: `${seg.overlayEnd - seg.overlayStart}%`
+                                }}>
+                            </div>
+                        ))}
+                        
+                        {/* Moving white circle indicator (YouTube style) */}
+                        <div className="absolute top-1/2 transition-all duration-100" 
+                            style={{left: `${timeProgress}%`, transform: 'translate(-50%, -50%)'}}>
+                            <div className="w-4 h-4 bg-white rounded-full shadow-lg border border-gray-400"></div>
+                        </div>
+                    </div>
+                    
+                    {/* Checkpoint markers below the bar */}
+                    <div className="relative h-8 mt-1">
+                        {segments.map((seg, i) => (
+                            <div key={i} className="absolute" style={{left: `${seg.startPercent}%`, transform: 'translateX(-50%)'}}>
+                                <div className={`w-2 h-2 rounded-full ${seg.rec ? 'bg-gray-700' : i === curr ? 'bg-yellow-400' : 'bg-gray-400'} mx-auto`}></div>
+                                <div className="text-xs font-bold text-gray-700 text-center">{i}</div>
+                            </div>
+                        ))}
+                        {/* End marker */}
+                        <div className="absolute" style={{right: '0%', transform: 'translateX(50%)'}}>
+                            <div className="w-2 h-2 rounded-full bg-gray-600 mx-auto"></div>
+                            <div className="text-xs font-bold text-gray-700 text-center">{active.cps.length}</div>
+                        </div>
+                    </div>
+                    
+                    <div className="flex justify-between text-xs text-gray-600 mt-2">
+                        <span>Start: {fmtReal(start)}</span>
+                        <span className="font-semibold">{fmtRel(elapsed)} / {fmtRel(totalExp)}</span>
+                        <span>End: {getExp(active.cps.length - 1)}</span>
+                    </div>
+                </div>;
+            };
+
+            if(active) {
+                const nextCp = curr < active.cps.length ? active.cps[curr] : null;
+                const isNextRegistered = cpTimes.find(t => t.cp === curr);
+                
+                return <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+                    <div className="max-w-2xl mx-auto">
+                        <div className="bg-white rounded-2xl shadow-xl p-6 mb-4">
+                            <div className="flex justify-between mb-4">
+                                <h2 className="text-2xl font-bold">{active.name}</h2>
+                                <button onClick={stopRoute} className="px-4 py-2 bg-red-500 text-white rounded-lg text-2xl">■</button>
+                            </div>
+                            <div className="space-y-3">
+                                <div className="font-mono text-2xl font-bold">{fmt(now - start - pauseTotal)}</div>
+                                <div className="font-mono text-xl text-blue-600">{fmtReal(now)}</div>
+                                <button onClick={togglePause} className={`w-full px-4 py-3 rounded-lg font-medium ${paused ? 'bg-green-500' : 'bg-yellow-500'} text-white text-2xl`}>
+                                    {paused ? '▶' : '⏸'}
+                                </button>
+                            </div>
+                        </div>
+
+                        <ProgressBar />
+
+                        {nextCp && !isNextRegistered && (
+                            <div className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-2xl shadow-2xl p-6 mb-4 ring-4 ring-blue-300">
+                                <div className="flex justify-between items-start mb-4">
+                                    <div>
+                                        <div className="text-sm opacity-90 mb-1">NEXT STOP</div>
+                                        <h3 className="text-2xl font-bold mb-2">{nextCp.name}</h3>
+                                        <div className="space-y-1 text-sm">
+                                            <div>Expected: {fmtRel(active.cps.slice(0, curr+1).reduce((s,c) => s + c.exp, 0))} (at {getExp(curr)})</div>
+                                        </div>
+                                    </div>
+                                    {!paused && (
+                                        <button onClick={reg} className="px-6 py-3 bg-white text-blue-600 rounded-xl font-bold shadow-lg hover:scale-105 transition text-3xl">
+                                            ✓
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="space-y-2">
+                            {active.cps.map((c, i) => {
+                                const rec = cpTimes.find(t => t.cp === i);
+                                const s = getStat(i);
+                                if(i === curr && !rec) return null;
+                                
+                                return <div key={i} className="bg-white rounded-lg shadow p-3">
+                                    <div className="flex justify-between items-center">
+                                        <div className="flex items-center gap-2">
+                                            <div className={`w-2 h-2 rounded-full ${rec ? (s?.stat === 'ok' ? 'bg-green-500' : s?.stat === 'early' ? 'bg-blue-500' : 'bg-red-500') : 'bg-gray-300'}`}></div>
+                                            <div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-medium text-sm">{c.name}</span>
+                                                    <span className="text-xs text-gray-500">#{i}</span>
+                                                </div>
+                                                <div className="text-xs text-gray-500">
+                                                    {c.dist > 0 && <span>{c.dist} km</span>}
+                                                    {c.dist > 0 && c.exp > 0 && <span> • {(c.exp / c.dist).toFixed(2)} min/km</span>}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="text-right text-xs">
+                                            <div className="text-gray-600">Exp: {getExp(i)}</div>
+                                            {rec && s && (
+                                                <div className={`font-medium ${s.stat === 'ok' ? 'text-green-600' : s.stat === 'early' ? 'text-blue-600' : 'text-red-600'}`}>
+                                                    {s.stat === 'ok' && '✓ On Time'}
+                                                    {s.stat === 'early' && `⚡ Early ${fmtTime(s.diff)}`}
+                                                    {s.stat === 'late' && `⏰ Late ${fmtTime(s.diff)}`}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>;
+                            })}
+                            <div className="bg-blue-50 rounded-lg p-3 text-sm">
+                                <div className="font-semibold text-gray-700">Total: {active.cps.reduce((s,c) => s + (c.dist || 0), 0).toFixed(1)} km</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>;
+            }
+
+            if(creating) {
+                // Calculate cumulative times for preview
+                let previewTime = 0;
+                let previewKm = 0;
+                const previewTimes = cps.map(c => {
+                    const cpTime = c.type === 'fixed' ? (c.time / 60) : ((c.dist || 0) * (c.rate || 0));
+                    previewTime += cpTime;
+                    previewKm += c.dist || 0;
+                    return previewTime;
+                });
+                const totalPreviewTime = previewTimes[previewTimes.length - 1] || 0;
+                
+                const parseTimeInput = (str) => {
+                    // Parse HH:MM:SS or MM:SS or just MM
+                    if (!str) return 0;
+                    const parts = str.toString().split(':').map(p => parseInt(p) || 0);
+                    if (parts.length === 3) return parts[0] * 60 + parts[1] + parts[2] / 60;
+                    if (parts.length === 2) return parts[0] + parts[1] / 60;
+                    return parseFloat(str) || 0;
+                };
+                
+                const formatTimeInput = (minutes) => {
+                    const h = Math.floor(minutes / 60);
+                    const m = Math.floor(minutes % 60);
+                    const s = Math.floor((minutes % 1) * 60);
+                    if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+                    return `${m}:${String(s).padStart(2,'0')}`;
+                };
+                
+                return <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+                    <div className="max-w-2xl mx-auto bg-white rounded-2xl shadow-xl p-6">
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-2xl font-bold">{editing ? 'Edit' : 'Create'} Route</h2>
+                            <div className="text-right">
+                                <div className="text-sm text-gray-600">Start</div>
+                                <div className="font-mono text-xl font-bold text-blue-600">00:00:00</div>
+                            </div>
+                        </div>
+                        <input value={name} onChange={e => setName(e.target.value)} placeholder="Route Name" className="w-full px-4 py-2 border rounded-lg mb-2"/>
+                        <input value={startPoint} onChange={e => setStartPoint(e.target.value)} placeholder="Start Point (optional)" className="w-full px-4 py-2 border rounded-lg mb-4"/>
+                        <div className="mb-4">
+                            <div className="flex justify-between mb-3">
+                                <label className="font-medium">Checkpoints</label>
+                                <button onClick={() => setCps([...cps, {name:'', type:'fixed', time:10, dist:5, rate:2}])} className="px-3 py-1 bg-blue-500 text-white rounded-lg text-sm">+ Add</button>
+                            </div>
+                            {cps.map((c, i) => {
+                                const cpTime = c.type === 'fixed' ? (c.time / 60) : ((c.dist || 0) * (c.rate || 0));
+                                const arrivalTime = previewTimes[i];
+                                const cumulativeKm = cps.slice(0, i + 1).reduce((s, cp) => s + (cp.dist || 0), 0);
+                                const displayRate = c.dist > 0 && c.time > 0 ? ((c.time / 60) / c.dist).toFixed(2) : c.rate;
+                                
+                                return <div key={i} className="border rounded-lg p-3 mb-3">
+                                    <div className="flex gap-2 mb-2">
+                                        <input value={c.name} onChange={e => {const n=[...cps]; n[i].name=e.target.value; setCps(n);}} placeholder={`Point ${i}`} className="flex-1 px-3 py-2 border rounded-lg text-sm"/>
+                                        <div className="px-3 py-2 bg-blue-50 rounded-lg font-mono text-sm text-blue-700 font-semibold whitespace-nowrap">
+                                            {fmtRel(arrivalTime)}
+                                        </div>
+                                        {cps.length > 1 && <button onClick={() => setCps(cps.filter((_,j) => j !== i))} className="px-3 text-red-500 text-xl">×</button>}
+                                    </div>
+                                    <div className="grid grid-cols-4 gap-2">
+                                        <select value={c.type} onChange={e => {const n=[...cps]; n[i].type=e.target.value; setCps(n);}} className="px-2 py-2 border rounded-lg text-xs">
+                                            <option value="fixed">Fixed</option>
+                                            <option value="distance">Distance</option>
+                                        </select>
+                                        <input type="number" value={c.dist || 0} onChange={e => {
+                                            const n=[...cps]; 
+                                            n[i].dist=parseFloat(e.target.value) || 0; 
+                                            if(n[i].type === 'distance' && n[i].rate) n[i].time = n[i].dist * n[i].rate * 60;
+                                            setCps(n);
+                                        }} className="px-2 py-2 border rounded-lg text-xs" placeholder="km"/>
+                                        <div className={`px-1 py-1 border rounded-lg text-xs flex items-center justify-center ${c.type === 'distance' ? 'bg-gray-100' : ''}`}>
+                                            <input 
+                                                type="number" 
+                                                value={Math.floor((c.type === 'fixed' ? c.time : (cpTime * 60)) / 3600)} 
+                                                onChange={e => {
+                                                    if(c.type === 'fixed') {
+                                                        const n=[...cps];
+                                                        const mins = Math.floor((n[i].time % 3600) / 60);
+                                                        const secs = n[i].time % 60;
+                                                        n[i].time = (parseInt(e.target.value) || 0) * 3600 + mins * 60 + secs;
+                                                        setCps(n);
+                                                    }
+                                                }}
+                                                disabled={c.type === 'distance'}
+                                                min="0"
+                                                max="99"
+                                                className={`w-6 bg-transparent text-center p-0 ${c.type === 'distance' ? 'text-gray-500' : ''}`}
+                                            />
+                                            <span className="text-gray-400 px-0.5">:</span>
+                                            <input 
+                                                type="number" 
+                                                value={Math.floor((c.type === 'fixed' ? c.time : (cpTime * 60)) % 3600 / 60)} 
+                                                onChange={e => {
+                                                    if(c.type === 'fixed') {
+                                                        const n=[...cps];
+                                                        const hrs = Math.floor(n[i].time / 3600);
+                                                        const secs = n[i].time % 60;
+                                                        n[i].time = hrs * 3600 + (parseInt(e.target.value) || 0) * 60 + secs;
+                                                        setCps(n);
+                                                    }
+                                                }}
+                                                disabled={c.type === 'distance'}
+                                                min="0"
+                                                max="59"
+                                                className={`w-6 bg-transparent text-center p-0 ${c.type === 'distance' ? 'text-gray-500' : ''}`}
+                                            />
+                                            <span className="text-gray-400 px-0.5">:</span>
+                                            <input 
+                                                type="number" 
+                                                value={(c.type === 'fixed' ? c.time : Math.round(cpTime * 60)) % 60} 
+                                                onChange={e => {
+                                                    if(c.type === 'fixed') {
+                                                        const n=[...cps];
+                                                        const hrs = Math.floor(n[i].time / 3600);
+                                                        const mins = Math.floor((n[i].time % 3600) / 60);
+                                                        n[i].time = hrs * 3600 + mins * 60 + (parseInt(e.target.value) || 0);
+                                                        setCps(n);
+                                                    }
+                                                }}
+                                                disabled={c.type === 'distance'}
+                                                min="0"
+                                                max="59"
+                                                className={`w-6 bg-transparent text-center p-0 ${c.type === 'distance' ? 'text-gray-500' : ''}`}
+                                            />
+                                        </div>
+                                        <input 
+                                            type="number" 
+                                            value={c.type === 'distance' ? (c.rate || 0) : displayRate} 
+                                            onChange={e => {
+                                                const n=[...cps]; 
+                                                n[i].rate=parseFloat(e.target.value) || 0;
+                                                if(n[i].type === 'distance' && n[i].dist) n[i].time = n[i].dist * n[i].rate * 60;
+                                                setCps(n);
+                                            }} 
+                                            disabled={c.type === 'fixed'}
+                                            className={`px-2 py-2 border rounded-lg text-xs ${c.type === 'fixed' ? 'bg-gray-100 text-gray-400' : ''}`}
+                                            step="0.1"
+                                            placeholder="min/km"
+                                        />
+                                    </div>
+                                    <div className="text-xs text-gray-400 mt-1 grid grid-cols-4 gap-2 px-1">
+                                        <span>Type</span>
+                                        <span>KM: {cumulativeKm.toFixed(1)}</span>
+                                        <span>HH:MM:SS</span>
+                                        <span>Rate</span>
+                                    </div>
+                                </div>;
+                            })}
+                        </div>
+                        <div className="bg-blue-50 rounded-lg p-4 mb-4">
+                            <div className="flex justify-between items-center mb-1">
+                                <span className="font-semibold text-gray-700">Total Time:</span>
+                                <span className="font-mono text-2xl font-bold text-blue-600">{fmtRel(totalPreviewTime)}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                                <span className="font-semibold text-gray-700">Total Distance:</span>
+                                <span className="font-mono text-xl font-bold text-gray-700">{previewKm.toFixed(1)} km</span>
+                            </div>
+                        </div>
+                        <div className="flex gap-3">
+                            <button onClick={saveRoute} className="flex-1 px-6 py-3 bg-blue-500 text-white rounded-lg font-medium">Save</button>
+                            <button onClick={() => {setCreating(false); setEditing(null); setName(''); setStartPoint(''); setCps([{name:'', type:'fixed', time:10, dist:5, rate:2}]);}} className="px-6 py-3 bg-gray-200 rounded-lg font-medium">Cancel</button>
+                        </div>
+                    </div>
+                </div>;
+            }
+
+            if(view === 'history') {
+                if(historyDetail) {
+                    const h = historyDetail;
+                    return <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+                        <div className="max-w-2xl mx-auto">
+                            <div className="bg-white rounded-2xl shadow-xl p-6 mb-4">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h1 className="text-2xl font-bold">{h.routeName}</h1>
+                                    <button onClick={() => setHistoryDetail(null)} className="px-4 py-2 bg-gray-200 rounded-lg">← Back</button>
+                                </div>
+                                <div className="text-sm text-gray-600 space-y-1">
+                                    <div>{h.date} at {h.time}</div>
+                                    {h.startPoint && <div>Start: {h.startPoint}</div>}
+                                    <div>Duration: {fmtRel(h.duration)} • Distance: {h.totalKm.toFixed(1)} km</div>
+                                </div>
+                                <div className="flex gap-4 text-sm mt-3">
+                                    <span className="text-green-600">✓ {h.stats.onTime}</span>
+                                    <span className="text-blue-600">⚡ {h.stats.early}</span>
+                                    <span className="text-red-600">⏰ {h.stats.late}</span>
+                                </div>
+                            </div>
+                            <div className="space-y-3">
+                                {h.checkpoints.map((cp, i) => (
+                                    <div key={i} className="bg-white rounded-xl shadow-lg p-4">
+                                        <div className="flex justify-between items-start mb-2">
+                                            <div>
+                                                <div className="flex items-center gap-2">
+                                                    <h3 className="font-semibold text-lg">{cp.name}</h3>
+                                                    <span className="text-xs text-gray-500">#{i}</span>
+                                                </div>
+                                                {cp.km > 0 && <div className="text-sm text-gray-500">{cp.km} km</div>}
+                                            </div>
+                                            <div className={`px-3 py-1 rounded-lg text-sm font-medium ${cp.status === 'ok' ? 'bg-green-100 text-green-700' : cp.status === 'early' ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}`}>
+                                                {cp.status === 'ok' && '✓ On Time'}
+                                                {cp.status === 'early' && `⚡ Early ${fmtTime(Math.abs(cp.diff))}`}
+                                                {cp.status === 'late' && `⏰ Late ${fmtTime(cp.diff)}`}
+                                            </div>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-2 text-sm">
+                                            <div>
+                                                <div className="text-gray-600">Expected</div>
+                                                <div className="font-mono">{fmtRel(cp.expected)}</div>
+                                            </div>
+                                            <div>
+                                                <div className="text-gray-600">Actual</div>
+                                                <div className="font-mono">{fmtRel(cp.actual)}</div>
+                                            </div>
+                                            <div>
+                                                <div className="text-gray-600">Real Time</div>
+                                                <div className="font-mono">{fmtReal(cp.realTime)}</div>
+                                            </div>
+                                            <div>
+                                                <div className="text-gray-600">Rate</div>
+                                                <div className="font-mono">{cp.rate || '-'} min/km</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>;
+                }
+                
+                return <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+                    <div className="max-w-2xl mx-auto">
+                        <div className="bg-white rounded-2xl shadow-xl p-6 mb-6">
+                            <div className="flex justify-between items-center">
+                                <h1 className="text-3xl font-bold">Trip History</h1>
+                                <button onClick={() => setView('routes')} className="px-4 py-2 bg-gray-200 rounded-lg">← Back</button>
+                            </div>
+                        </div>
+                        {history.length === 0 ? 
+                            <div className="bg-white rounded-2xl shadow-xl p-12 text-center">
+                                <h3 className="text-xl font-semibold mb-2">No Trip History</h3>
+                                <p className="text-gray-600">Complete a route to see history here</p>
+                            </div> :
+                            <div className="space-y-4">
+                                {history.map(h => <div key={h.id} className="bg-white rounded-xl shadow-lg p-5 cursor-pointer hover:shadow-2xl transition" onClick={() => setHistoryDetail(h)}>
+                                    <div className="flex justify-between items-start mb-3">
+                                        <div>
+                                            <h3 className="text-xl font-semibold">{h.routeName}</h3>
+                                            <p className="text-sm text-gray-600">{h.date} at {h.time}</p>
+                                            <p className="text-sm text-gray-600">Duration: {fmtRel(h.duration)} • {h.totalKm.toFixed(1)} km</p>
+                                        </div>
+                                        <button onClick={(e) => {e.stopPropagation(); if(confirm('Delete this trip?')) saveHistory(history.filter(x => x.id !== h.id));}} className="p-2 text-red-500">🗑️</button>
+                                    </div>
+                                    <div className="flex gap-4 text-sm">
+                                        <span className="text-green-600">✓ On Time: {h.stats.onTime}</span>
+                                        <span className="text-blue-600">⚡ Early: {h.stats.early}</span>
+                                        <span className="text-red-600">⏰ Late: {h.stats.late}</span>
+                                    </div>
+                                    <div className="text-xs text-gray-500 mt-2">Tap for details →</div>
+                                </div>)}
+                            </div>
+                        }
+                    </div>
+                </div>;
+            }
+
+            return <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+                <div className="max-w-2xl mx-auto">
+                    <div className="bg-white rounded-2xl shadow-xl p-6 mb-6">
+                        <div className="flex justify-between items-center mb-4">
+                            <div>
+                                <h1 className="text-3xl font-bold">Transit Timer</h1>
+                                <p className="text-gray-600 mt-1">Track your route timing</p>
+                            </div>
+                            <button onClick={() => setCreating(true)} className="px-6 py-3 bg-blue-500 text-white rounded-lg font-medium">+ New Route</button>
+                        </div>
+                        <div className="flex gap-2">
+                            <button onClick={() => setView('history')} className="px-4 py-2 bg-gray-100 rounded-lg text-sm">📊 History</button>
+                            <button onClick={backupToSheets} className="px-4 py-2 bg-green-100 text-green-700 rounded-lg text-sm">☁️ Backup</button>
+                            <button onClick={restoreFromSheets} className="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg text-sm">📥 Restore</button>
+                        </div>
+                    </div>
+                    {routes.length === 0 ? 
+                        <div className="bg-white rounded-2xl shadow-xl p-12 text-center">
+                            <h3 className="text-xl font-semibold mb-2">No Routes Yet</h3>
+                            <button onClick={() => setCreating(true)} className="px-6 py-3 bg-blue-500 text-white rounded-lg font-medium">Create Route</button>
+                        </div> :
+                        <div className="space-y-4">
+                            {routes.map(r => {
+                                const totalKm = r.cps.reduce((s,c) => s + (c.dist || 0), 0);
+                                return <div key={r.id} className="bg-white rounded-xl shadow-lg p-5">
+                                <div className="flex justify-between mb-3">
+                                    <div>
+                                        <h3 className="text-xl font-semibold">{r.name}</h3>
+                                        {r.startPoint && <p className="text-sm text-gray-500">From: {r.startPoint}</p>}
+                                        <p className="text-sm text-gray-600">{r.cps.length} checkpoints • {r.cps.reduce((s,c) => s + c.exp, 0).toFixed(1)} min • {totalKm.toFixed(1)} km</p>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button onClick={() => {setEditing(r); setName(r.name); setStartPoint(r.startPoint || ''); setCps(r.cps.map(c => ({name:c.name, type:c.type, time:c.time, dist:c.dist, rate:c.rate}))); setCreating(true);}} className="p-2">✏️</button>
+                                        <button onClick={() => confirm('Delete?') && save(routes.filter(x => x.id !== r.id))} className="p-2 text-red-500">🗑️</button>
+                                    </div>
+                                </div>
+                                <button onClick={() => startRoute(r)} className="w-full px-4 py-3 bg-blue-500 text-white rounded-lg font-medium">▶ Start Route</button>
+                            </div>;
+                            })}
+                        </div>
+                    }
+                </div>
+            </div>;
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>

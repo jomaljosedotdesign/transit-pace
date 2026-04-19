@@ -9,11 +9,18 @@
     <meta name="description" content="Track your transit route timing and stay on schedule">
     <title>Transit Timer</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-        .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-        * { -webkit-tap-highlight-color: transparent; }
-    </style>
+	<style>
+		@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+		.animate-pulse { animation: pulse 2s ease-in-out infinite; }
+
+		* { -webkit-tap-highlight-color: transparent; }
+
+		body {
+			font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+			background: #f5f5f5;
+			color: #111;
+		}
+	</style>
 </head>
 <body>
     <div id="root"></div>
@@ -331,7 +338,7 @@
                     <div className="relative h-8 mt-1">
                         {segments.map((seg, i) => (
                             <div key={i} className="absolute" style={{left: `${seg.startPercent}%`, transform: 'translateX(-50%)'}}>
-                                <div className={`w-2 h-2 rounded-full ${seg.rec ? 'bg-gray-700' : i === curr ? 'bg-yellow-400' : 'bg-gray-400'} mx-auto`}></div>
+                                <div className={`w-2 h-2 rounded-full ${seg.rec ? 'bg-gray-700' : i === curr ? 'bg-neutral-700' : 'bg-gray-400'} mx-auto`}></div>
                                 <div className="text-xs font-bold text-gray-700 text-center">{i}</div>
                             </div>
                         ))}
@@ -354,79 +361,208 @@
                 const nextCp = curr < active.cps.length ? active.cps[curr] : null;
                 const isNextRegistered = cpTimes.find(t => t.cp === curr);
                 
-                return <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+                return <div className="min-h-screen bg-neutral-100 p-4">
                     <div className="max-w-2xl mx-auto">
-                        <div className="bg-white rounded-2xl shadow-xl p-6 mb-4">
-                            <div className="flex justify-between mb-4">
-                                <h2 className="text-2xl font-bold">{active.name}</h2>
-                                <button onClick={stopRoute} className="px-4 py-2 bg-red-500 text-white rounded-lg text-2xl">■</button>
-                            </div>
-                            <div className="space-y-3">
-                                <div className="font-mono text-2xl font-bold">{fmt(now - start - pauseTotal)}</div>
-                                <div className="font-mono text-xl text-blue-600">{fmtReal(now)}</div>
-                                <button onClick={togglePause} className={`w-full px-4 py-3 rounded-lg font-medium ${paused ? 'bg-green-500' : 'bg-yellow-500'} text-white text-2xl`}>
-                                    {paused ? '▶' : '⏸'}
-                                </button>
-                            </div>
-                        </div>
+						<div className="bg-white rounded-md shadow-sm p-6 mb-4">
+							<div className="flex justify-between mb-4">
+								<div>
+									<h2 className="text-2xl font-semibold">{active.name}</h2>
+									{active.startPoint && (
+										<div className="text-sm text-gray-600">From: {active.startPoint}</div>
+									)}
+								</div>
+							</div>
+
+							<div className="grid grid-cols-2 gap-4 text-sm">
+								<div>
+									<div className="text-xs text-neutral-500">Duration</div>
+									<div className="font-mono text-lg text-blue-500">
+										{fmt(now - start - pauseTotal)}
+									</div>
+								</div>
+
+								<div>
+									<div className="text-xs text-neutral-500">Clock</div>
+									<div className="font-mono text-lg text-blue-500">
+										{fmtReal(now)}
+									</div>
+								</div>
+
+								<div>
+									<div className="text-xs text-neutral-500">Expected Duration</div>
+									<div className="font-mono text-lg text-blue-500">
+										{fmtRel(active.cps.reduce((s,c)=>s+c.exp,0))}
+									</div>
+								</div>
+
+								<div>
+									<div className="text-xs text-neutral-500">Expected Clock</div>
+									<div className="font-mono text-lg text-blue-500">
+										{getExp(active.cps.length - 1)}
+									</div>
+								</div>
+							</div>
+							<div class="flex gap-2">
+								<button 
+									onClick={togglePause} 
+									className={`w-full mt-4 px-4 py-3 rounded-md ${paused ? 'text-white' : 'bg-blue-500'} bg-blue-500 text-white text-sm`}
+								>
+									{paused ? '▶' : '⏸'}
+								</button>
+								<button onClick={stopRoute} className="mt-4 px-4 py-3 text-white bg-red-500 rounded-md text-sm">■</button>
+							</div>
+						</div>
+
 
                         <ProgressBar />
 
-                        {nextCp && !isNextRegistered && (
-                            <div className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-2xl shadow-2xl p-6 mb-4 ring-4 ring-blue-300">
-                                <div className="flex justify-between items-start mb-4">
-                                    <div>
-                                        <div className="text-sm opacity-90 mb-1">NEXT STOP</div>
-                                        <h3 className="text-2xl font-bold mb-2">{nextCp.name}</h3>
-                                        <div className="space-y-1 text-sm">
-                                            <div>Expected: {fmtRel(active.cps.slice(0, curr+1).reduce((s,c) => s + c.exp, 0))} (at {getExp(curr)})</div>
-                                        </div>
-                                    </div>
-                                    {!paused && (
-                                        <button onClick={reg} className="px-6 py-3 bg-white text-blue-600 rounded-xl font-bold shadow-lg hover:scale-105 transition text-3xl">
-                                            ✓
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
-                        )}
+                        {nextCp && !isNextRegistered && (() => {
+							const i = curr;
+
+							let exp = 0;
+							for(let j = 0; j <= i; j++) exp += active.cps[j].exp;
+
+							const prevExp = i > 0 ? active.cps.slice(0, i).reduce((s,c)=>s+c.exp,0) : 0;
+							const segmentExp = exp - prevExp;
+
+							const totalKm = active.cps.slice(0, i+1).reduce((s,c)=>s+(c.dist||0),0);
+							const segmentKm = nextCp.dist || 0;
+
+							const plannedRate = segmentKm > 0 ? (segmentExp / segmentKm).toFixed(2) : '-';
+
+							return (
+							<div className="bg-white border border-neutral-300 rounded-md shadow-sm p-6 mb-4 ring-4">
+								<div className="flex justify-between items-start">
+									<div>
+										<div className="text-blue-500 text-sm opacity-90">Next Stop</div>
+
+										<div className="flex items-center gap-2 mb-2">
+											<span className="text-sm opacity-80">#{i}</span>
+											<h3 className="text-lg font-semibold">{nextCp.name}</h3>
+										</div>
+
+										<div className="grid grid-cols-3 gap-4  text-sm">
+											<div>
+												<div className="text-xs text-neutral-500">
+												Seg Dist: 
+												</div>
+												<div className="font-mono text-lg text-blue-500">
+												{segmentKm} km
+												</div>
+												<div className="text-xs text-neutral-500">
+												Total Dist: 
+												</div>
+												<div className="font-mono text-lg text-blue-500">
+												{totalKm.toFixed(2)} km
+												</div>
+											</div>
+											<div>
+												<div className="text-xs text-neutral-500">
+												Exp Duration: 
+												</div>
+												<div className="font-mono text-lg text-blue-500">
+												{fmtRel(exp)}
+												</div>
+												<div className="text-xs text-neutral-500">
+												Exp Time: 
+												</div>
+												<div className="font-mono text-lg text-blue-500">
+												{getExp(i)}
+												</div>
+											</div>
+											<div>
+												<div className="text-xs text-neutral-500">
+												Rate: 
+												</div>
+												<div className="font-mono text-lg text-blue-500">
+												{plannedRate} min/km
+												</div>
+											</div>
+										</div>
+									</div>
+
+									{!paused && (
+										<button 
+											onClick={reg} 
+											className="mt-4 px-4 py-3 bg-blue-500 text-white rounded-md hover:scale-105 transition text-sm"
+										>
+											✓
+										</button>
+									)}
+								</div>
+							</div>
+							);
+						})()}
 
                         <div className="space-y-2">
                             {active.cps.map((c, i) => {
-                                const rec = cpTimes.find(t => t.cp === i);
-                                const s = getStat(i);
-                                if(i === curr && !rec) return null;
-                                
-                                return <div key={i} className="bg-white rounded-lg shadow p-3">
-                                    <div className="flex justify-between items-center">
-                                        <div className="flex items-center gap-2">
-                                            <div className={`w-2 h-2 rounded-full ${rec ? (s?.stat === 'ok' ? 'bg-green-500' : s?.stat === 'early' ? 'bg-blue-500' : 'bg-red-500') : 'bg-gray-300'}`}></div>
-                                            <div>
-                                                <div className="flex items-center gap-2">
-                                                    <span className="font-medium text-sm">{c.name}</span>
-                                                    <span className="text-xs text-gray-500">#{i}</span>
-                                                </div>
-                                                <div className="text-xs text-gray-500">
-                                                    {c.dist > 0 && <span>{c.dist} km</span>}
-                                                    {c.dist > 0 && c.exp > 0 && <span> • {(c.exp / c.dist).toFixed(2)} min/km</span>}
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div className="text-right text-xs">
-                                            <div className="text-gray-600">Exp: {getExp(i)}</div>
-                                            {rec && s && (
-                                                <div className={`font-medium ${s.stat === 'ok' ? 'text-green-600' : s.stat === 'early' ? 'text-blue-600' : 'text-red-600'}`}>
-                                                    {s.stat === 'ok' && '✓ On Time'}
-                                                    {s.stat === 'early' && `⚡ Early ${fmtTime(s.diff)}`}
-                                                    {s.stat === 'late' && `⏰ Late ${fmtTime(s.diff)}`}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>;
-                            })}
-                            <div className="bg-blue-50 rounded-lg p-3 text-sm">
-                                <div className="font-semibold text-gray-700">Total: {active.cps.reduce((s,c) => s + (c.dist || 0), 0).toFixed(1)} km</div>
+								const rec = cpTimes.find(t => t.cp === i);
+								const s = getStat(i);
+
+								let exp = 0;
+								for(let j = 0; j <= i; j++) exp += active.cps[j].exp;
+
+								const prevExp = i > 0 ? active.cps.slice(0, i).reduce((s,c)=>s+c.exp,0) : 0;
+								const segmentExp = exp - prevExp;
+
+								const totalKm = active.cps.slice(0, i+1).reduce((s,c)=>s+(c.dist||0),0);
+								const segmentKm = c.dist || 0;
+
+								const plannedRate = segmentKm > 0 ? (segmentExp / segmentKm).toFixed(2) : '-';
+
+								const registeredRate = rec && segmentKm > 0
+									? ((rec.time - (cpTimes[i-1]?.time || 0)) / segmentKm).toFixed(2)
+									: null;
+
+								if(i === curr && !rec) return null;
+
+								return (
+								<div key={i} className="bg-white rounded-md shadow p-3">
+									<div className="flex justify-between items-center">
+										<div>
+											<div className="flex items-center gap-2">
+												<span className="text-xs text-neutral-500">#{i}</span>
+												<span className="text-lg font-semibold">{c.name}</span>
+											</div>
+
+											<div className="text-xs text-neutral-500">
+												{segmentKm} km • Total: {totalKm.toFixed(2)} KM
+											</div>
+
+											<div className="text-xs text-neutral-500">
+												Rate: {plannedRate} min/km
+												{registeredRate && ` • Actual: ${registeredRate}`}
+											</div>
+										</div>
+
+										<div className="text-right text-xs text-neutral-500">
+											<div>Exp: {fmtRel(exp)}</div>
+											<div className="text-neutral-500">{getExp(i)}</div>
+
+											{rec && (
+												<>
+													<div>Reg: {fmtRel(rec.time)}</div>
+													<div className="text-neutral-500">{fmtReal(rec.real)}</div>
+												</>
+											)}
+
+											{s && (
+												<div className={`font-medium ${
+													s.stat === 'ok' ? 'text-green-600' :
+													s.stat === 'early' ? 'text-blue-700' : 'text-red-600'
+												}`}>
+													{s.stat === 'ok' && '✓ On Time'}
+													{s.stat === 'early' && `⚡ Early ${fmtTime(s.diff)}`}
+													{s.stat === 'late' && `⏰ Late ${fmtTime(s.diff)}`}
+												</div>
+											)}
+										</div>
+									</div>
+								</div>
+								);
+							})}
+                            <div className="bg-white rounded-md p-3 text-sm">
+                                <div className="text-xs text-neutral-500">Total: {active.cps.reduce((s,c) => s + (c.dist || 0), 0).toFixed(1)} km</div>
                             </div>
                         </div>
                     </div>
@@ -462,21 +598,21 @@
                     return `${m}:${String(s).padStart(2,'0')}`;
                 };
                 
-                return <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-                    <div className="max-w-2xl mx-auto bg-white rounded-2xl shadow-xl p-6">
+                return <div className="min-h-screen bg-neutral-100 p-4">
+                    <div className="max-w-2xl mx-auto bg-white rounded-md shadow-sm p-6">
                         <div className="flex justify-between items-center mb-6">
-                            <h2 className="text-2xl font-bold">{editing ? 'Edit' : 'Create'} Route</h2>
+                            <h2 className="text-2xl font-semibold">{editing ? 'Edit' : 'Create'} Route</h2>
                             <div className="text-right">
                                 <div className="text-sm text-gray-600">Start</div>
-                                <div className="font-mono text-xl font-bold text-blue-600">00:00:00</div>
+                                <div className="font-mono text-lg text-blue-700">00:00:00</div>
                             </div>
                         </div>
-                        <input value={name} onChange={e => setName(e.target.value)} placeholder="Route Name" className="w-full px-4 py-2 border rounded-lg mb-2"/>
-                        <input value={startPoint} onChange={e => setStartPoint(e.target.value)} placeholder="Start Point (optional)" className="w-full px-4 py-2 border rounded-lg mb-4"/>
+                        <input value={name} onChange={e => setName(e.target.value)} placeholder="Route Name" className="w-full px-4 py-2 border rounded-3xl text-xs mb-2"/>
+                        <input value={startPoint} onChange={e => setStartPoint(e.target.value)} placeholder="Start Point" className="w-full px-4 py-2 border rounded-3xl text-xs mb-4"/>
                         <div className="mb-4">
                             <div className="flex justify-between mb-3">
-                                <label className="font-medium">Checkpoints</label>
-                                <button onClick={() => setCps([...cps, {name:'', type:'fixed', time:10, dist:5, rate:2}])} className="px-3 py-1 bg-blue-500 text-white rounded-lg text-sm">+ Add</button>
+                                <label className="text-lg font-semibold">Checkpoints</label>
+                                <button onClick={() => setCps([...cps, {name:'', type:'fixed', time:10, dist:5, rate:2}])} className="px-3 py-1 bg-blue-500 text-white rounded-md text-sm">+ Add</button>
                             </div>
                             {cps.map((c, i) => {
                                 const cpTime = c.type === 'fixed' ? (c.time / 60) : ((c.dist || 0) * (c.rate || 0));
@@ -484,16 +620,19 @@
                                 const cumulativeKm = cps.slice(0, i + 1).reduce((s, cp) => s + (cp.dist || 0), 0);
                                 const displayRate = c.dist > 0 && c.time > 0 ? ((c.time / 60) / c.dist).toFixed(2) : c.rate;
                                 
-                                return <div key={i} className="border rounded-lg p-3 mb-3">
+                                return <div key={i} className="border rounded-md p-3 mb-3">
                                     <div className="flex gap-2 mb-2">
-                                        <input value={c.name} onChange={e => {const n=[...cps]; n[i].name=e.target.value; setCps(n);}} placeholder={`Point ${i}`} className="flex-1 px-3 py-2 border rounded-lg text-sm"/>
-                                        <div className="px-3 py-2 bg-blue-50 rounded-lg font-mono text-sm text-blue-700 font-semibold whitespace-nowrap">
+                                        <input value={c.name} onChange={e => {const n=[...cps]; n[i].name=e.target.value; setCps(n);}} placeholder={`Point ${i}`} className="flex-1 px-3 py-2 border rounded-3xl text-xs"/>
+                                        <div className="px-3 py-2 bg-neutral-100 border border-blue-500 rounded-md font-mono text-sm text-blue-500 font-semibold whitespace-nowrap">
                                             {fmtRel(arrivalTime)}
                                         </div>
-                                        {cps.length > 1 && <button onClick={() => setCps(cps.filter((_,j) => j !== i))} className="px-3 text-red-500 text-xl">×</button>}
+										<div className="px-3 py-2 bg-neutral-100 border border-blue-500 rounded-md font-mono text-sm text-blue-500 font-semibold whitespace-nowrap">
+                                            {cumulativeKm.toFixed(2)} KM
+                                        </div>
+                                        {cps.length > 1 && <button onClick={() => setCps(cps.filter((_,j) => j !== i))} className="px-3 border border-red-500 rounded-md text-red-500 text-xl">×</button>}
                                     </div>
                                     <div className="grid grid-cols-4 gap-2">
-                                        <select value={c.type} onChange={e => {const n=[...cps]; n[i].type=e.target.value; setCps(n);}} className="px-2 py-2 border rounded-lg text-xs">
+                                        <select value={c.type} onChange={e => {const n=[...cps]; n[i].type=e.target.value; setCps(n);}} className="px-2 py-2 border rounded-3xl text-xs">
                                             <option value="fixed">Fixed</option>
                                             <option value="distance">Distance</option>
                                         </select>
@@ -502,8 +641,8 @@
                                             n[i].dist=parseFloat(e.target.value) || 0; 
                                             if(n[i].type === 'distance' && n[i].rate) n[i].time = n[i].dist * n[i].rate * 60;
                                             setCps(n);
-                                        }} className="px-2 py-2 border rounded-lg text-xs" placeholder="km"/>
-                                        <div className={`px-1 py-1 border rounded-lg text-xs flex items-center justify-center ${c.type === 'distance' ? 'bg-gray-100' : ''}`}>
+                                        }} className="px-2 py-2 border rounded-3xl text-xs" placeholder="km"/>
+                                        <div className={`px-1 py-1 border rounded-3xl text-xs flex items-center justify-center ${c.type === 'distance' ? 'bg-neutral-100' : ''}`}>
                                             <input 
                                                 type="number" 
                                                 value={Math.floor((c.type === 'fixed' ? c.time : (cpTime * 60)) / 3600)} 
@@ -519,7 +658,7 @@
                                                 disabled={c.type === 'distance'}
                                                 min="0"
                                                 max="99"
-                                                className={`w-6 bg-transparent text-center p-0 ${c.type === 'distance' ? 'text-gray-500' : ''}`}
+                                                className={`w-10 bg-transparent text-center p-0 ${c.type === 'distance' ? 'text-gray-500' : ''}`}
                                             />
                                             <span className="text-gray-400 px-0.5">:</span>
                                             <input 
@@ -537,7 +676,7 @@
                                                 disabled={c.type === 'distance'}
                                                 min="0"
                                                 max="59"
-                                                className={`w-6 bg-transparent text-center p-0 ${c.type === 'distance' ? 'text-gray-500' : ''}`}
+                                                className={`w-10 bg-transparent text-center p-0 ${c.type === 'distance' ? 'text-gray-500' : ''}`}
                                             />
                                             <span className="text-gray-400 px-0.5">:</span>
                                             <input 
@@ -555,7 +694,7 @@
                                                 disabled={c.type === 'distance'}
                                                 min="0"
                                                 max="59"
-                                                className={`w-6 bg-transparent text-center p-0 ${c.type === 'distance' ? 'text-gray-500' : ''}`}
+                                                className={`w-10 bg-transparent text-center p-0 ${c.type === 'distance' ? 'text-gray-500' : ''}`}
                                             />
                                         </div>
                                         <input 
@@ -568,33 +707,33 @@
                                                 setCps(n);
                                             }} 
                                             disabled={c.type === 'fixed'}
-                                            className={`px-2 py-2 border rounded-lg text-xs ${c.type === 'fixed' ? 'bg-gray-100 text-gray-400' : ''}`}
+                                            className={`px-2 py-2 border rounded-3xl text-xs ${c.type === 'fixed' ? 'bg-neutral-100 text-gray-500' : ''}`}
                                             step="0.1"
                                             placeholder="min/km"
                                         />
                                     </div>
                                     <div className="text-xs text-gray-400 mt-1 grid grid-cols-4 gap-2 px-1">
                                         <span>Type</span>
-                                        <span>KM: {cumulativeKm.toFixed(1)}</span>
+                                        <span>KM</span>
                                         <span>HH:MM:SS</span>
                                         <span>Rate</span>
                                     </div>
                                 </div>;
                             })}
                         </div>
-                        <div className="bg-blue-50 rounded-lg p-4 mb-4">
+                        <div className="bg-neutral-100 rounded-md p-4 mb-4">
                             <div className="flex justify-between items-center mb-1">
-                                <span className="font-semibold text-gray-700">Total Time:</span>
-                                <span className="font-mono text-2xl font-bold text-blue-600">{fmtRel(totalPreviewTime)}</span>
+                                <span className="text-sm text-gray-600">Total Time:</span>
+                                <span className="font-mono text-lg text-blue-500">{fmtRel(totalPreviewTime)}</span>
                             </div>
                             <div className="flex justify-between items-center">
-                                <span className="font-semibold text-gray-700">Total Distance:</span>
-                                <span className="font-mono text-xl font-bold text-gray-700">{previewKm.toFixed(1)} km</span>
+                                <span className="text-sm text-gray-600">Total Distance:</span>
+                                <span className="font-mono text-lg text-blue-500">{previewKm.toFixed(2)} KM</span>
                             </div>
                         </div>
                         <div className="flex gap-3">
-                            <button onClick={saveRoute} className="flex-1 px-6 py-3 bg-blue-500 text-white rounded-lg font-medium">Save</button>
-                            <button onClick={() => {setCreating(false); setEditing(null); setName(''); setStartPoint(''); setCps([{name:'', type:'fixed', time:10, dist:5, rate:2}]);}} className="px-6 py-3 bg-gray-200 rounded-lg font-medium">Cancel</button>
+                            <button onClick={saveRoute} className="flex-1 px-6 py-3 border border-neutral-200 bg-neutral-100 text-blue-500 rounded-md text-sm">Save</button>
+                            <button onClick={() => {setCreating(false); setEditing(null); setName(''); setStartPoint(''); setCps([{name:'', type:'fixed', time:10, dist:5, rate:2}]);}} className="px-6 py-3 border border-neutral-200 bg-neutral-100 text-sm text-neutral-900 rounded-md text-sm">Cancel</button>
                         </div>
                     </div>
                 </div>;
@@ -603,95 +742,173 @@
             if(view === 'history') {
                 if(historyDetail) {
                     const h = historyDetail;
-                    return <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+                    return <div className="min-h-screen bg-neutral-100 p-4">
                         <div className="max-w-2xl mx-auto">
-                            <div className="bg-white rounded-2xl shadow-xl p-6 mb-4">
+                            <div className="bg-white rounded-md shadow-sm p-6 mb-4">
                                 <div className="flex justify-between items-center mb-4">
-                                    <h1 className="text-2xl font-bold">{h.routeName}</h1>
-                                    <button onClick={() => setHistoryDetail(null)} className="px-4 py-2 bg-gray-200 rounded-lg">← Back</button>
+                                    <h1 className="text-2xl font-semibold">{h.routeName}</h1>
+                                    <button onClick={() => setHistoryDetail(null)} className="px-4 py-2 border border-neutral-200 bg-neutral-100 text-sm text-neutral-900 rounded-md text-sm">← Back</button>
                                 </div>
-                                <div className="text-sm text-gray-600 space-y-1">
-                                    <div>{h.date} at {h.time}</div>
-                                    {h.startPoint && <div>Start: {h.startPoint}</div>}
-                                    <div>Duration: {fmtRel(h.duration)} • Distance: {h.totalKm.toFixed(1)} km</div>
-                                </div>
+								
+								<div className="grid grid-cols-3 gap-4 text-sm">
+									<div>
+										<div className="text-xs text-neutral-500">
+										Date:  
+										</div>
+										<div className="font-mono text-lg text-blue-500">
+										{h.date}
+										</div>
+										<div className="text-xs text-neutral-500">
+										Time: 
+										</div>
+										<div className="font-mono text-lg text-blue-500">
+										{h.time}
+										</div>
+									</div>
+									<div>
+										<div className="text-xs text-neutral-500">
+										Duration: 
+										</div>
+										<div className="font-mono text-lg text-blue-500">
+										{fmtRel(h.duration)}
+										</div>
+										<div className="text-xs text-neutral-500">
+										Distance:  
+										</div>
+										<div className="font-mono text-lg text-blue-500">
+										{h.totalKm.toFixed(2)} KM
+										</div>
+									</div>
+									{h.startPoint && <div>Start: {h.startPoint}</div>}
+								</div>
                                 <div className="flex gap-4 text-sm mt-3">
                                     <span className="text-green-600">✓ {h.stats.onTime}</span>
-                                    <span className="text-blue-600">⚡ {h.stats.early}</span>
+                                    <span className="text-blue-700">⚡ {h.stats.early}</span>
                                     <span className="text-red-600">⏰ {h.stats.late}</span>
                                 </div>
                             </div>
                             <div className="space-y-3">
-                                {h.checkpoints.map((cp, i) => (
-                                    <div key={i} className="bg-white rounded-xl shadow-lg p-4">
-                                        <div className="flex justify-between items-start mb-2">
-                                            <div>
-                                                <div className="flex items-center gap-2">
-                                                    <h3 className="font-semibold text-lg">{cp.name}</h3>
-                                                    <span className="text-xs text-gray-500">#{i}</span>
-                                                </div>
-                                                {cp.km > 0 && <div className="text-sm text-gray-500">{cp.km} km</div>}
-                                            </div>
-                                            <div className={`px-3 py-1 rounded-lg text-sm font-medium ${cp.status === 'ok' ? 'bg-green-100 text-green-700' : cp.status === 'early' ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}`}>
-                                                {cp.status === 'ok' && '✓ On Time'}
-                                                {cp.status === 'early' && `⚡ Early ${fmtTime(Math.abs(cp.diff))}`}
-                                                {cp.status === 'late' && `⏰ Late ${fmtTime(cp.diff)}`}
-                                            </div>
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-2 text-sm">
-                                            <div>
-                                                <div className="text-gray-600">Expected</div>
-                                                <div className="font-mono">{fmtRel(cp.expected)}</div>
-                                            </div>
-                                            <div>
-                                                <div className="text-gray-600">Actual</div>
-                                                <div className="font-mono">{fmtRel(cp.actual)}</div>
-                                            </div>
-                                            <div>
-                                                <div className="text-gray-600">Real Time</div>
-                                                <div className="font-mono">{fmtReal(cp.realTime)}</div>
-                                            </div>
-                                            <div>
-                                                <div className="text-gray-600">Rate</div>
-                                                <div className="font-mono">{cp.rate || '-'} min/km</div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
+                                {h.checkpoints.map((cp, i) => {
+									const totalKm = h.checkpoints.slice(0, i+1).reduce((s,c)=>s+(c.km||0),0);
+
+									return (
+									<div key={i} className="bg-white rounded-md shadow-sm p-4">
+										<div className="flex justify-between mb-2">
+											<div>
+												<div className="flex items-center gap-3">
+													<span className="text-xs text-gray-600">#{i}</span>
+													<h3 className="text-lg font-semibold">{cp.name}</h3>
+												</div>
+
+												<div className="grid grid-cols-4 gap-4 text-sm">
+													<div>
+														<div className="text-xs text-neutral-500">
+														Seg Dist:  
+														</div>
+														<div className="font-mono text-lg text-blue-500">
+														{cp.km} km
+														</div>
+														<div className="text-xs text-neutral-500">
+														Total Dist: 
+														</div>
+														<div className="font-mono text-lg text-blue-500">
+														{totalKm.toFixed(2)} KM
+														</div>
+													</div>
+													<div>
+														<div className="text-xs text-neutral-500">
+														Exp Duration: 
+														</div>
+														<div className="font-mono text-lg text-blue-500">
+														{fmtRel(cp.expected)}
+														</div>
+														<div className="text-xs text-neutral-500">
+														Act Duration:  
+														</div>
+														<div className="font-mono text-lg text-blue-500">
+														{fmtRel(cp.actual)}
+														</div>
+													</div>
+													<div>
+														<div className="text-xs text-neutral-500">
+															Exp Time:
+														</div>
+														<div className="font-mono text-lg">
+															{fmtReal(cp.expectedClock)}
+														</div>
+
+														<div className="text-xs text-neutral-500">
+															Act Time:
+														</div>
+														<div className="font-mono text-lg">
+															{fmtReal(cp.realTime)}
+														</div>
+													</div>
+													<div>
+														<div className="text-xs text-neutral-500">
+														Exp Rate: 
+														</div>
+														<div className="font-mono text-lg text-blue-500">
+														{cp.km > 0 ? (cp.expected / totalKm).toFixed(2) : '-'}
+														</div>
+														<div className="text-xs text-neutral-500">
+														Act Rate:  
+														</div>
+														<div className="font-mono text-lg text-blue-500">
+														{cp.rate && ` ${cp.rate}`}
+														</div>
+													</div>
+												</div>
+											</div>
+											
+											<div className="text-right text-sm text-gray-600">
+												<div className={`font-medium ${
+													cp.status === 'ok' ? 'text-green-600' :
+													cp.status === 'early' ? 'text-blue-700' : 'text-red-600'
+												}`}>
+													{cp.status === 'ok' && '✓ On Time'}
+													{cp.status === 'early' && '⚡ Early'}
+													{cp.status === 'late' && '⏰ Late'}
+												</div>
+											</div>
+										</div>
+									</div>
+									);
+								})}
                             </div>
                         </div>
                     </div>;
                 }
                 
-                return <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+                return <div className="min-h-screen bg-neutral-100 p-4">
                     <div className="max-w-2xl mx-auto">
-                        <div className="bg-white rounded-2xl shadow-xl p-6 mb-6">
+                        <div className="bg-white rounded-md shadow-sm p-6 mb-6">
                             <div className="flex justify-between items-center">
-                                <h1 className="text-3xl font-bold">Trip History</h1>
-                                <button onClick={() => setView('routes')} className="px-4 py-2 bg-gray-200 rounded-lg">← Back</button>
+                                <h1 className="text-2xl font-semibold">Trip History</h1>
+                                <button onClick={() => setView('routes')} className="px-4 py-2 border border-neutral-200 bg-neutral-100 text-sm text-neutral-900 rounded-md text-sm">← Back</button>
                             </div>
                         </div>
                         {history.length === 0 ? 
-                            <div className="bg-white rounded-2xl shadow-xl p-12 text-center">
+                            <div className="bg-white border border-neutral-200 rounded-md shadow-sm p-12 text-center">
                                 <h3 className="text-xl font-semibold mb-2">No Trip History</h3>
-                                <p className="text-gray-600">Complete a route to see history here</p>
+                                <p className="text-sm text-gray-600">Complete a route to see history here</p>
                             </div> :
                             <div className="space-y-4">
-                                {history.map(h => <div key={h.id} className="bg-white rounded-xl shadow-lg p-5 cursor-pointer hover:shadow-2xl transition" onClick={() => setHistoryDetail(h)}>
+                                {history.map(h => <div key={h.id} className="bg-white border border-neutral-200 rounded-md shadow-sm p-5 cursor-pointer hover:shadow-md transition" onClick={() => setHistoryDetail(h)}>
                                     <div className="flex justify-between items-start mb-3">
                                         <div>
-                                            <h3 className="text-xl font-semibold">{h.routeName}</h3>
+                                            <h3 className="text-lg font-semibold">{h.routeName}</h3>
                                             <p className="text-sm text-gray-600">{h.date} at {h.time}</p>
                                             <p className="text-sm text-gray-600">Duration: {fmtRel(h.duration)} • {h.totalKm.toFixed(1)} km</p>
                                         </div>
                                         <button onClick={(e) => {e.stopPropagation(); if(confirm('Delete this trip?')) saveHistory(history.filter(x => x.id !== h.id));}} className="p-2 text-red-500">🗑️</button>
                                     </div>
                                     <div className="flex gap-4 text-sm">
-                                        <span className="text-green-600">✓ On Time: {h.stats.onTime}</span>
-                                        <span className="text-blue-600">⚡ Early: {h.stats.early}</span>
-                                        <span className="text-red-600">⏰ Late: {h.stats.late}</span>
+                                        <span className="text-sm text-green-600">✓ On Time: {h.stats.onTime}</span>
+                                        <span className="text-sm text-blue-700">⚡ Early: {h.stats.early}</span>
+                                        <span className="text-sm text-red-600">⏰ Late: {h.stats.late}</span>
                                     </div>
-                                    <div className="text-xs text-gray-500 mt-2">Tap for details →</div>
+                                    <div className="text-xs text-gray-600 mt-2">Tap for details →</div>
                                 </div>)}
                             </div>
                         }
@@ -699,35 +916,35 @@
                 </div>;
             }
 
-            return <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+            return <div className="min-h-screen bg-neutral-100 p-4">
                 <div className="max-w-2xl mx-auto">
-                    <div className="bg-white rounded-2xl shadow-xl p-6 mb-6">
+                    <div className="bg-white rounded-md shadow-sm p-6 mb-6">
                         <div className="flex justify-between items-center mb-4">
                             <div>
-                                <h1 className="text-3xl font-bold">Transit Timer</h1>
-                                <p className="text-gray-600 mt-1">Track your route timing</p>
+                                <h1 className="text-2xl font-semibold">Transit Timer</h1>
+                                <p className="text-sm text-gray-600">Track your route timing</p>
                             </div>
-                            <button onClick={() => setCreating(true)} className="px-6 py-3 bg-blue-500 text-white rounded-lg font-medium">+ New Route</button>
+                            <button onClick={() => setCreating(true)} className="mt-4 px-4 py-3 bg-blue-500 font-black text-white rounded-md text-sm">+</button>
                         </div>
                         <div className="flex gap-2">
-                            <button onClick={() => setView('history')} className="px-4 py-2 bg-gray-100 rounded-lg text-sm">📊 History</button>
-                            <button onClick={backupToSheets} className="px-4 py-2 bg-green-100 text-green-700 rounded-lg text-sm">☁️ Backup</button>
-                            <button onClick={restoreFromSheets} className="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg text-sm">📥 Restore</button>
+                            <button onClick={() => setView('history')} className="px-4 py-2 border border-neutral-200 bg-neutral-100 text-sm text-neutral-900 rounded-md text-sm">📊 History</button>
+                            <button onClick={backupToSheets} className="px-4 py-2 border border-neutral-200 bg-neutral-100 text-sm text-neutral-900 rounded-md text-sm">☁️ Backup</button>
+                            <button onClick={restoreFromSheets} className="px-4 py-2 border border-neutral-200 bg-neutral-100 text-sm text-neutral-900 rounded-md text-sm">📥 Restore</button>
                         </div>
                     </div>
                     {routes.length === 0 ? 
-                        <div className="bg-white rounded-2xl shadow-xl p-12 text-center">
-                            <h3 className="text-xl font-semibold mb-2">No Routes Yet</h3>
-                            <button onClick={() => setCreating(true)} className="px-6 py-3 bg-blue-500 text-white rounded-lg font-medium">Create Route</button>
+                        <div className="bg-white border border-neutral-200 rounded-md shadow-sm p-12 text-center">
+                            <h3 className="text-lg font-semibold mb-2">No Routes Yet</h3>
+                            <button onClick={() => setCreating(true)} className="px-6 py-3 bg-blue-500 text-lg text-white rounded-md text-sm">Create Route</button>
                         </div> :
                         <div className="space-y-4">
                             {routes.map(r => {
                                 const totalKm = r.cps.reduce((s,c) => s + (c.dist || 0), 0);
-                                return <div key={r.id} className="bg-white rounded-xl shadow-lg p-5">
+                                return <div key={r.id} className="bg-white border border-neutral-200 rounded-md shadow-sm p-5">
                                 <div className="flex justify-between mb-3">
                                     <div>
-                                        <h3 className="text-xl font-semibold">{r.name}</h3>
-                                        {r.startPoint && <p className="text-sm text-gray-500">From: {r.startPoint}</p>}
+                                        <h3 className="text-lg font-semibold">{r.name}</h3>
+                                        {r.startPoint && <p className="text-sm text-gray-600">From: {r.startPoint}</p>}
                                         <p className="text-sm text-gray-600">{r.cps.length} checkpoints • {r.cps.reduce((s,c) => s + c.exp, 0).toFixed(1)} min • {totalKm.toFixed(1)} km</p>
                                     </div>
                                     <div className="flex gap-2">
@@ -735,7 +952,7 @@
                                         <button onClick={() => confirm('Delete?') && save(routes.filter(x => x.id !== r.id))} className="p-2 text-red-500">🗑️</button>
                                     </div>
                                 </div>
-                                <button onClick={() => startRoute(r)} className="w-full px-4 py-3 bg-blue-500 text-white rounded-lg font-medium">▶ Start Route</button>
+                                <button onClick={() => startRoute(r)} className="w-full px-4 py-3 border border-neutral-200 bg-neutral-100 text-blue-500 rounded-md text-sm">▶ Start Route</button>
                             </div>;
                             })}
                         </div>

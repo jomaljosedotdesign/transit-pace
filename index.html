@@ -743,13 +743,15 @@
                                 return <div key={i} className="border rounded-md p-3 mb-3">
                                     <div className="flex gap-2 mb-2">
                                         <input value={c.name} onChange={e => {const n=[...cps]; n[i].name=e.target.value; setCps(n);}} placeholder={`Point ${i}`} className="flex-1 px-3 py-2 border rounded-3xl text-xs"/>
-                                        <div className="px-3 py-2 bg-neutral-100 border border-blue-500 rounded-md font-mono text-sm text-blue-500 font-semibold whitespace-nowrap">
-                                            {fmtRel(arrivalTime)}
-                                        </div>
+										{cps.length > 1 && <IconButton icon="close" onClick={() => setCps(cps.filter((_,j) => j !== i))} bg="bg-red-500" color="text-white" />}
+									</div>
+									<div className="flex gap-2 mb-2">
 										<div className="px-3 py-2 bg-neutral-100 border border-blue-500 rounded-md font-mono text-sm text-blue-500 font-semibold whitespace-nowrap">
                                             {cumulativeKm.toFixed(2)} KM
                                         </div>
-                                        {cps.length > 1 && <IconButton icon="close" onClick={() => setCps(cps.filter((_,j) => j !== i))} bg="bg-red-500" color="text-white" />}
+										<div className="px-3 py-2 bg-neutral-100 border border-blue-500 rounded-md font-mono text-sm text-blue-500 font-semibold whitespace-nowrap">
+                                            {fmtRel(arrivalTime)}
+                                        </div>
                                     </div>
                                     <div className="space-y-2">
 										<div className="flex gap-2">

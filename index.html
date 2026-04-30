@@ -187,7 +187,7 @@
                 a.download = `transit-timer-backup-${new Date().toISOString().split('T')[0]}.json`;
                 a.click();
                 URL.revokeObjectURL(url);
-                alert('Backup downloaded! Upload this file to your Google Drive, then use Google Sheets to import it.');
+                alert('Backup downloaded!');
             };
 
             const restoreFromSheets = () => {
@@ -445,7 +445,7 @@
                     {/* Checkpoint markers below the bar */}
                     <div className="relative h-8 mt-1">
                         {segments.map((seg, i) => (
-                            <div key={i} className="absolute" style={{left: `${seg.startPercent}%`, transform: 'translateX(-50%)'}}>
+                            <div key={i} className="absolute" style={{left: `${seg.endPercent}%`, transform: 'translateX(-50%)'}}>
                                 <div className={`w-2 h-2 rounded-full mx-auto ${
 								  seg.rec 
 									? 'bg-gray-700' 
@@ -453,7 +453,7 @@
 									  ? 'bg-neutral-900 animate-pulse' 
 									  : 'bg-gray-400'
 								}`}></div>
-                                <div className="text-xs font-bold text-gray-700 text-center">{i}</div>
+                                <div className="text-xs font-bold text-gray-700 text-center">{i + 1}</div>
                             </div>
                         ))}
                         {/* End marker */}
@@ -551,13 +551,13 @@
 							const plannedRate = segmentKm > 0 ? (segmentExp / segmentKm).toFixed(2) : '-';
 
 							return (
-							<div className="bg-white border border-neutral-300 rounded-md shadow-sm p-6 mb-4 ring-4">
+							<div className="bg-white border border-neutral-300 rounded-md shadow-sm p-6 mb-4 ring-4 ring-blue-500">
 								<div className="flex justify-between items-start">
 									<div>
 										<div className="text-blue-500 text-sm opacity-90">Next Stop</div>
 
 										<div className="flex items-center gap-2 mb-2">
-											<span className="text-sm opacity-80">#{i}</span>
+											<span className="text-sm opacity-80">#{i + 1}</span>
 											<h3 className="text-lg font-semibold">{nextCp.name}</h3>
 										</div>
 
@@ -641,7 +641,7 @@
 									<div className="flex justify-between items-center">
 										<div>
 											<div className="flex items-center gap-2">
-												<span className="text-xs text-neutral-500">#{i}</span>
+												<span className="text-xs text-neutral-500">#{i + 1}</span>
 												<span className="text-lg font-semibold">{c.name}</span>
 											</div>
 
@@ -743,15 +743,13 @@
                                 return <div key={i} className="border rounded-md p-3 mb-3">
                                     <div className="flex gap-2 mb-2">
                                         <input value={c.name} onChange={e => {const n=[...cps]; n[i].name=e.target.value; setCps(n);}} placeholder={`Point ${i}`} className="flex-1 px-3 py-2 border rounded-3xl text-xs"/>
-										{cps.length > 1 && <IconButton icon="close" onClick={() => setCps(cps.filter((_,j) => j !== i))} bg="bg-red-500" color="text-white" />}
-									</div>
-									<div className="flex gap-2 mb-2">
+                                        <div className="px-3 py-2 bg-neutral-100 border border-blue-500 rounded-md font-mono text-sm text-blue-500 font-semibold whitespace-nowrap">
+                                            {fmtRel(arrivalTime)}
+                                        </div>
 										<div className="px-3 py-2 bg-neutral-100 border border-blue-500 rounded-md font-mono text-sm text-blue-500 font-semibold whitespace-nowrap">
                                             {cumulativeKm.toFixed(2)} KM
                                         </div>
-										<div className="px-3 py-2 bg-neutral-100 border border-blue-500 rounded-md font-mono text-sm text-blue-500 font-semibold whitespace-nowrap">
-                                            {fmtRel(arrivalTime)}
-                                        </div>
+                                        {cps.length > 1 && <IconButton icon="close" onClick={() => setCps(cps.filter((_,j) => j !== i))} bg="bg-red-500" color="text-white" />}
                                     </div>
                                     <div className="space-y-2">
 										<div className="flex gap-2">
@@ -933,22 +931,22 @@
 										<div className="justify-between mb-2">
 											<div>
 												<div className="flex items-center gap-3">
-													<span className="text-xs text-gray-600">#{i}</span>
+													<span className="text-xs text-gray-600">#{i + 1}</span>
 													<h3 className="text-lg font-semibold">{cp.name}</h3>
 												</div>
 
-												<div className="grid grid-cols-4 gap-6 text-sm w-full">
+												<div className="grid grid-cols-4 gap-6 text-xs w-full">
 													<div>
 														<div className="text-xs text-neutral-500">
 														Seg Dist:  
 														</div>
-														<div className="font-mono text-lg text-blue-500">
+														<div className="font-mono text-sm text-blue-500">
 														{cp.km} km
 														</div>
 														<div className="text-xs text-neutral-500">
 														Total Dist: 
 														</div>
-														<div className="font-mono text-lg text-blue-500">
+														<div className="font-mono text-sm text-blue-500">
 														{totalKm.toFixed(2)} KM
 														</div>
 													</div>
@@ -956,13 +954,13 @@
 														<div className="text-xs text-neutral-500">
 														Exp Duration: 
 														</div>
-														<div className="font-mono text-lg text-blue-500">
+														<div className="font-mono text-sm text-blue-500">
 														{fmtRel(cp.expected)}
 														</div>
 														<div className="text-xs text-neutral-500">
 														Act Duration:  
 														</div>
-														<div className="font-mono text-lg text-blue-500">
+														<div className="font-mono text-sm text-blue-500">
 														{fmtRel(cp.actual)}
 														</div>
 													</div>
@@ -970,14 +968,14 @@
 														<div className="text-xs text-neutral-500">
 															Exp Time:
 														</div>
-														<div className="font-mono text-lg text-blue-500">
+														<div className="font-mono text-sm text-blue-500">
 															{fmtReal(cp.expectedClock)}
 														</div>
 
 														<div className="text-xs text-neutral-500">
 															Act Time:
 														</div>
-														<div className="font-mono text-lg text-blue-500">
+														<div className="font-mono text-sm text-blue-500">
 															{fmtReal(cp.realTime)}
 														</div>
 													</div>
@@ -985,13 +983,13 @@
 														<div className="text-xs text-neutral-500">
 														Exp Rate: 
 														</div>
-														<div className="font-mono text-lg text-blue-500">
+														<div className="font-mono text-sm text-blue-500">
 														{cp.km > 0 ? (cp.expected / totalKm).toFixed(2) : '-'}
 														</div>
 														<div className="text-xs text-neutral-500">
 														Act Rate:  
 														</div>
-														<div className="font-mono text-lg text-blue-500">
+														<div className="font-mono text-sm text-blue-500">
 														{cp.rate && ` ${cp.rate}`}
 														</div>
 													</div>

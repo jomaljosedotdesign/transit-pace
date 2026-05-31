@@ -1,8 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-	<link rel="manifest" href="/manifest.json">
-	<link rel="icon" type="image/png" href="/favicon.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#3B82F6">
@@ -130,6 +128,19 @@
 				<path d="M8 14h8v6H8z" />
 			  </svg>
 			),
+			duplicate: (
+			  <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2">
+				<rect x="8" y="8" width="10" height="10" rx="1" />
+				<rect x="4" y="4" width="10" height="10" rx="1" />
+			  </svg>
+			),
+			flip: (
+			  <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2">
+				<path d="M12 3v18" />
+				<path d="M4 7l6 5-6 5z" />
+				<path d="M20 7l-6 5 6 5z" />
+			  </svg>
+			),
 		};
 		const IconButton = ({ icon, onClick, bg="bg-neutral-100", color="" }) => (
 			<button
@@ -148,7 +159,7 @@
             const [creating, setCreating] = useState(false);
             const [editing, setEditing] = useState(null);
             const [name, setName] = useState('');
-            const [cps, setCps] = useState([{name:'', type:'start', dist:0, exp:0}, {name:'', type:'fixed', time:600, dist:5, rate:2, halt:{enabled:false, time:300}}]);
+            const [cps, setCps] = useState([{name:'', type:'start', dist:0, exp:0}, {name:'', type:'fixed', time:600, dist:5, rate:2, halt:{enabled:false, time:300}, subPoints:[]}]);
             const [start, setStart] = useState(null);
             const [curr, setCurr] = useState(0);
             const [cpTimes, setCpTimes] = useState([]);
@@ -158,6 +169,8 @@
             const [now, setNow] = useState(Date.now());
 			const [haltActive, setHaltActive] = useState(false);
 			const [haltStart, setHaltStart] = useState(null);
+			const [expandedSubPoints, setExpandedSubPoints] = useState({});
+			const [expandedSegments, setExpandedSegments] = useState({});
 
             useEffect(() => {
                 const s = localStorage.getItem('routes');
@@ -245,13 +258,58 @@
 					name,
 					cps: cps.map(c => c.type === 'start'
 						? {...c, exp: 0}
-						: {...c, exp: (c.type === 'fixed' ? (c.time / 60) : (c.dist * c.rate)) + (c.halt?.enabled ? c.halt.time / 60 : 0)}
+						: {...c, exp: (c.type === 'fixed' ? (c.time / 60) : (c.dist * c.rate)) + (c.halt?.enabled ? c.halt.time / 60 : 0), subPoints: c.subPoints || []}
 					)
 				};
 				save(editing ? routes.map(r => r.id === route.id ? route : r) : [...routes, route]);
 				setCps([{name:'', type:'start', dist:0, exp:0}, {name:'', type:'fixed', time:600, dist:5, rate:2, halt:{enabled:false, time:300}}]); setCreating(false); setEditing(null);
 			};
+			const duplicateRoute = r => {
+				const copy = {
+					...JSON.parse(JSON.stringify(r)),
+					id: Date.now(),
+					name: `${r.name} (Copy)`
+				};
+				save([...routes, copy]);
+			};
 
+			const flipRoute = r => {
+				const cps = r.cps;
+				const flipped = [...cps].reverse().map((c, i, arr) => {
+					if(i === 0) {
+						return {
+							...c,
+							type: 'start',
+							exp: 0,
+							dist: 0,
+							rate: 0,
+							time: 0,
+							subPoints: [],
+							halt: {enabled: false, time: 300}
+						};
+					}
+					const donor = arr[i - 1];
+					const donorHaltTime = donor.halt?.enabled ? donor.halt.time / 60 : 0;
+					const donorTravelExp = donor.exp - donorHaltTime;
+					return {
+						...c,
+						type: donor.type === 'start' ? 'fixed' : donor.type,
+						exp: donorTravelExp + (c.halt?.enabled ? c.halt.time / 60 : 0),
+						dist: donor.dist || 0,
+						rate: donor.rate || 0,
+						time: donor.time || 0,
+						subPoints: donor.type !== 'start' ? [...(donor.subPoints || [])].reverse() : [],
+						halt: c.halt
+					};
+				});
+				const flippedRoute = {
+					...JSON.parse(JSON.stringify(r)),
+					id: Date.now(),
+					name: `${r.name} (Flipped)`,
+					cps: flipped
+				};
+				save([...routes, flippedRoute]);
+			};
             const startRoute = r => {
 				const now = Date.now();
 				setActive(r); setStart(now); setCurr(1);
@@ -512,6 +570,28 @@
 								</div>
 							);
 						})}
+						{active.cps.map((c, i) => {
+							if(!c.subPoints?.length) return null;
+							const segStartExp = (() => {
+								let e = 0;
+								for(let j = 0; j < i; j++) e += active.cps[j].exp;
+								return e;
+							})();
+							const parentTravelExp = c.exp - (c.halt?.enabled ? c.halt.time / 60 : 0);
+							const parentDist = c.dist || 1;
+							const rate = parentTravelExp / parentDist;
+							let subCumDist = 0;
+							return c.subPoints.map((sp, si) => {
+								subCumDist += sp.dist || 0;
+								const spExp = segStartExp + (subCumDist * rate);
+								const spPct = (spExp / totalExp) * 100;
+								return (
+									<div key={`sp-${i}-${si}`} className="absolute" style={{ left: `${spPct}%`, transform: 'translateX(-50%)' }}>
+										<div className="w-1.5 h-1.5 rounded-full bg-neutral-400 mx-auto mt-0.5"></div>
+									</div>
+								);
+							});
+						})}
 						{cpTimes.filter(ct => ct.haltActual !== undefined).map(ct => {
 							const haltDepartTime = ct.time + ct.haltActual;
 							const haltDepartPct = Math.min((haltDepartTime / totalExp) * 100, 100);
@@ -734,7 +814,10 @@
 									? ((rec.time - prevTime) / segmentKm).toFixed(2)
 									: null;
 
-								if(c.type === 'start') return (
+								const nextCp = active.cps[i + 1];
+								const showToggle = c.type !== 'start' && c.subPoints?.length > 0;
+
+								const cpCard = c.type === 'start' ? (
 									<div key={i} className="bg-white rounded-md shadow p-3">
 										<div className="flex justify-between items-center">
 											<div>
@@ -751,55 +834,95 @@
 											</div>
 										</div>
 									</div>
-								);
-								if(i === curr && !rec) return null;
-
-								return (
-								<div key={i} className="bg-white rounded-md shadow p-3">
-									<div className="flex justify-between items-center">
-										<div>
-											<div className="flex items-center gap-2">
-												<span className="text-xs text-neutral-500">#{i}</span>
-												<span className="text-lg font-semibold">{c.name}</span>
-											</div>
-
-											<div className="text-xs text-neutral-500">
-												{segmentKm} km • Total: {totalKm.toFixed(2)} KM
-											</div>
-
-											<div className="text-xs text-neutral-500">
-												Rate: {plannedRate} min/km
-												{registeredRate && ` • Actual: ${registeredRate}`}
-											</div>
-										</div>
-
-										<div className="text-right text-xs text-neutral-500">
-											<div>Exp: {fmtRel(travelOnly)}</div>
-											<div className="text-neutral-500">{fmtReal(start + travelOnly * 60000 + pauseTotal)}</div>
-
-											{rec && (
-												<>
-													<div>Reg: {fmtRel(rec.time)}</div>
-													<div className="text-neutral-500">{fmtReal(rec.real)}</div>
-												</>
-											)}
-
-											{s && (
-												<div className={`font-medium flex items-center gap-2 ${
-													s.stat === 'ok' ? 'text-green-600' :
-													s.stat === 'early' ? 'text-blue-700' : 'text-red-600'
-												}`}>
-													{s.stat === 'ok' && <>{Icons.onTime} On Time</>}
-													{s.stat === 'early' && <>{Icons.early} Early {fmtTime(s.diff)}</>}
-													{s.stat === 'late' && <>{Icons.late} Late {fmtTime(s.diff)}</>}
+								) : (
+									<div key={i} className="bg-white rounded-md shadow p-3">
+										<div className="flex justify-between items-center">
+											<div>
+												<div className="flex items-center gap-2">
+													<span className="text-xs text-neutral-500">#{i}</span>
+													<span className="text-lg font-semibold">{c.name}</span>
 												</div>
-											)}
+												<div className="text-xs text-neutral-500">
+													{segmentKm} km • Total: {totalKm.toFixed(2)} KM
+												</div>
+												<div className="text-xs text-neutral-500">
+													Rate: {plannedRate} min/km
+													{registeredRate && ` • Actual: ${registeredRate}`}
+												</div>
+											</div>
+											<div className="text-right text-xs text-neutral-500">
+												<div>Exp: {fmtRel(travelOnly)}</div>
+												<div className="text-neutral-500">{fmtReal(start + travelOnly * 60000 + pauseTotal)}</div>
+												{rec && (
+													<>
+														<div>Reg: {fmtRel(rec.time)}</div>
+														<div className="text-neutral-500">{fmtReal(rec.real)}</div>
+													</>
+												)}
+												{s && (
+													<div className={`font-medium flex items-center gap-2 ${
+														s.stat === 'ok' ? 'text-green-600' :
+														s.stat === 'early' ? 'text-blue-700' : 'text-red-600'
+													}`}>
+														{s.stat === 'ok' && <>{Icons.onTime} On Time</>}
+														{s.stat === 'early' && <>{Icons.early} Early {fmtTime(s.diff)}</>}
+														{s.stat === 'late' && <>{Icons.late} Late {fmtTime(s.diff)}</>}
+													</div>
+												)}
+											</div>
 										</div>
 									</div>
-								</div>
+								);
+
+								const subPointBlock = showToggle ? (
+									<>
+										<div
+											className="text-center py-2 cursor-pointer text-xs text-neutral-400 hover:text-blue-500"
+											onClick={() => setExpandedSegments({...expandedSegments, [i]: !expandedSegments[i]})}
+										>
+											{expandedSegments[i] ? 'Hide Sub Points ▲' : `Sub Points (${c.subPoints.length}) ▼`}
+										</div>
+										{expandedSegments[i] && (() => {
+											const segStartExp = (() => {
+												let e = 0;
+												for(let j = 0; j < i; j++) e += active.cps[j].exp;
+												return e;
+											})();
+											const parentTravelExp = c.exp - (c.halt?.enabled ? c.halt.time / 60 : 0);
+											const parentDist = c.dist || 1;
+											const rate = parentTravelExp / parentDist;
+											let subCumDist = 0;
+											return c.subPoints.map((sp, si) => {
+												subCumDist += sp.dist || 0;
+												const spExp = segStartExp + (subCumDist * rate);
+												return (
+													<div key={si} className="bg-neutral-50 border border-neutral-200 rounded-md p-3 ml-4">
+														<div className="flex justify-between items-center">
+															<div>
+																<div className="text-xs text-neutral-400">Sub Point</div>
+																<div className="text-sm font-medium">{sp.name}</div>
+																<div className="text-xs text-neutral-400">{subCumDist.toFixed(2)} km into segment</div>
+															</div>
+															<div className="text-right text-xs text-neutral-500">
+																<div>{fmtRel(spExp)}</div>
+																<div>{fmtReal(start + spExp * 60000 + pauseTotal)}</div>
+															</div>
+														</div>
+													</div>
+												);
+											});
+										})()}
+									</>
+								) : null;
+
+								return (
+									<React.Fragment key={i}>
+										{subPointBlock}
+										{cpCard}
+									</React.Fragment>
 								);
 							})}
-                            <div className="bg-white rounded-md p-3 text-sm">
+								<div className="bg-white rounded-md p-3 text-sm">
                                 <div className="text-xs text-neutral-500">Total: {active.cps.reduce((s,c) => s + (c.dist || 0), 0).toFixed(2)} km</div>
                             </div>
                         </div>
@@ -849,7 +972,7 @@
                         <div className="mb-4">
                             <div className="flex justify-between mb-3">
                                 <label className="text-lg font-semibold">Checkpoints</label>
-                                <button onClick={() => setCps([...cps, {name:'', type:'fixed', time:600, dist:5, rate:2, halt:{enabled:false, time:300}}])} className="px-6 py-3 bg-blue-500 text-white rounded-md text-sm flex items-center gap-2">{Icons.add} Add</button>
+                                <button onClick={() => setCps([...cps, {name:'', type:'fixed', time:600, dist:5, rate:2, halt:{enabled:false, time:300}, subPoints:[]}])} className="px-6 py-3 bg-blue-500 text-white rounded-md text-sm flex items-center gap-2">{Icons.add} Add</button>
                             </div>
                             {cps.map((c, i) => {
                                 const cpTime = c.type === 'fixed' ? (c.time / 60) : ((c.dist || 0) * (c.rate || 0));
@@ -1059,8 +1182,90 @@
 												)}
 											</div>
 										)}
-                                    </div>
-                                </div>;
+
+										{c.type !== 'start' && (() => {
+											const subTotal = (c.subPoints || []).reduce((s, sp) => s + (sp.dist || 0), 0);
+											const overLimit = subTotal >= (c.dist || 0) && (c.subPoints || []).length > 0;
+											const expanded = expandedSubPoints[i];
+											return (
+												<div className="mt-2 border-t pt-2">
+													<div className="flex items-center justify-between">
+														<span className="text-xs text-gray-600">
+															Sub Points {c.subPoints?.length > 0 ? `(${c.subPoints.length})` : ''}
+														</span>
+														<button
+															onClick={() => setExpandedSubPoints({...expandedSubPoints, [i]: !expanded})}
+															className="px-3 py-1 rounded-full text-xs bg-neutral-100 text-gray-500"
+														>
+															{expanded ? 'Hide' : 'Show'}
+														</button>
+													</div>
+													{overLimit && (
+														<div className="text-xs text-red-500 mt-1">
+															Sub point distances equal or exceed segment distance
+														</div>
+													)}
+													{expanded && (
+														<div className="mt-2 space-y-2">
+															{(c.subPoints || []).map((sp, si) => {
+																const cumDist = c.subPoints.slice(0, si + 1).reduce((s, x) => s + (x.dist || 0), 0);
+																return (
+																	<div key={si} className="flex gap-2 items-center">
+																		<input
+																			value={sp.name}
+																			onChange={e => {
+																				const n = [...cps];
+																				n[i].subPoints[si].name = e.target.value;
+																				setCps(n);
+																			}}
+																			placeholder={`Sub Point ${si + 1}`}
+																			className="flex-1 px-2 py-1 border rounded-3xl text-xs"
+																		/>
+																		<input
+																			type="number"
+																			value={sp.dist || 0}
+																			onChange={e => {
+																				const n = [...cps];
+																				n[i].subPoints[si].dist = parseFloat(e.target.value) || 0;
+																				setCps(n);
+																			}}
+																			className="w-16 px-2 py-1 border rounded-3xl text-xs"
+																			placeholder="km"
+																			step="0.1"
+																		/>
+																		<div className="text-xs text-blue-500 font-mono whitespace-nowrap">
+																			{cumDist.toFixed(2)} km
+																		</div>
+																		<IconButton
+																			icon="close"
+																			onClick={() => {
+																				const n = [...cps];
+																				n[i].subPoints = n[i].subPoints.filter((_, j) => j !== si);
+																				setCps(n);
+																			}}
+																			bg="bg-red-500"
+																			color="text-white"
+																		/>
+																	</div>
+																);
+															})}
+															<button
+																onClick={() => {
+																	const n = [...cps];
+																	n[i].subPoints = [...(n[i].subPoints || []), {name: '', dist: 0}];
+																	setCps(n);
+																}}
+																className="w-full px-3 py-2 border border-dashed border-blue-300 text-blue-500 rounded-md text-xs flex items-center justify-center gap-2"
+															>
+																{Icons.add} Add Sub Point
+															</button>
+														</div>
+													)}
+												</div>
+											);
+										})()}
+											</div>
+										</div>;
                             })}
                         </div>
                         <div className="bg-neutral-100 rounded-md p-4 mb-4">
@@ -1075,7 +1280,7 @@
                         </div>
                         <div className="flex gap-3">
                             <button onClick={saveRoute} className="flex-1 px-6 py-3 border border-neutral-200 bg-neutral-100 text-blue-500 rounded-md text-sm flex justify-center items-center gap-2">{Icons.save}Save</button>
-                            <button onClick={() => {setCreating(false); setEditing(null); setName(''); setCps([{name:'', type:'start', dist:0, exp:0}, {name:'', type:'fixed', time:600, dist:5, rate:2}]);}} className="px-6 py-3 border border-neutral-200 bg-neutral-100 text-sm text-neutral-900 rounded-md text-sm flex items-center gap-2">{Icons.close}Cancel</button>
+                            <button onClick={() => {setCreating(false); setEditing(null); setName(''); setCps([{name:'', type:'start', dist:0, exp:0}, {name:'', type:'fixed', time:600, dist:5, rate:2, halt:{enabled:false, time:300}, subPoints:[]}]);}} className="px-6 py-3 border border-neutral-200 bg-neutral-100 text-sm text-neutral-900 rounded-md text-sm flex items-center gap-2">{Icons.close}Cancel</button>
                         </div>
                     </div>
                 </div>;
@@ -1320,6 +1525,18 @@
                                         <p className="text-sm text-gray-600">{r.cps.length} checkpoints • {r.cps.reduce((s,c) => s + (c.exp || 0), 0).toFixed(2)} min • {totalKm.toFixed(2)} km</p>
                                     </div>
                                     <div className="flex gap-2">
+										<IconButton
+											icon="duplicate"
+											onClick={() => duplicateRoute(r)}
+											bg="bg-neutral-100"
+											color="text-blue-500"
+										/>
+										<IconButton
+											icon="flip"
+											onClick={() => flipRoute(r)}
+											bg="bg-neutral-100"
+											color="text-blue-500"
+										/>
 										<IconButton 
 											icon="edit"
 											onClick={() => {
@@ -1333,7 +1550,8 @@
 														time: c.type === 'fixed' ? ((c.exp - (c.halt?.enabled ? c.halt.time / 60 : 0)) * 60) : (c.time || 600),
 														dist: c.dist || 0,
 														rate: c.rate || 0,
-														halt: {enabled: c.halt?.enabled === true, time: c.halt?.time || 300}
+														halt: {enabled: c.halt?.enabled === true, time: c.halt?.time || 300},
+														subPoints: c.subPoints || []
 													  }
 												));
 												setCreating(true);

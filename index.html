@@ -141,6 +141,13 @@
 				<path d="M20 7l-6 5 6 5z" />
 			  </svg>
 			),
+			options: (
+			  <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor">
+				<circle cx="12" cy="5" r="1.5"/>
+				<circle cx="12" cy="12" r="1.5"/>
+				<circle cx="12" cy="19" r="1.5"/>
+			  </svg>
+			),
 		};
 		const IconButton = ({ icon, onClick, bg="bg-neutral-100", color="" }) => (
 			<button
@@ -150,11 +157,14 @@
 				{Icons[icon]}
 			</button>
 		);
+		
+		const ON_TIME_THRESHOLD = 2; // seconds
+		
         function App() {
             const [routes, setRoutes] = useState([]);
             const [history, setHistory] = useState([]);
             const [active, setActive] = useState(null);
-            const [view, setView] = useState('routes'); // routes, history, creating
+            const [view, setView] = useState('routes'); // routes, history, creating, routeview
             const [historyDetail, setHistoryDetail] = useState(null);
             const [creating, setCreating] = useState(false);
             const [editing, setEditing] = useState(null);
@@ -171,6 +181,8 @@
 			const [haltStart, setHaltStart] = useState(null);
 			const [expandedSubPoints, setExpandedSubPoints] = useState({});
 			const [expandedSegments, setExpandedSegments] = useState({});
+			const [routeMenu, setRouteMenu] = useState(null);
+			const [viewRoute, setViewRoute] = useState(null);
 
             useEffect(() => {
                 const s = localStorage.getItem('routes');
@@ -355,19 +367,19 @@
                         let e = 0;
                         for(let i = 0; i <= c.cp; i++) e += active.cps[i].exp;
 						e -= (active.cps[c.cp].halt?.enabled ? active.cps[c.cp].halt.time / 60 : 0);
-                        return Math.abs((c.time - e) * 60) < 10;
+                        return Math.abs((c.time - e) * 60) < ON_TIME_THRESHOLD;
                     }).length;
                     const early = cpTimes.filter(c => {
                         let e = 0;
                         for(let i = 0; i <= c.cp; i++) e += active.cps[i].exp;
 						e -= (active.cps[c.cp].halt?.enabled ? active.cps[c.cp].halt.time / 60 : 0);
-                        return (c.time - e) * 60 < -10;
+                        return (c.time - e) * 60 < -ON_TIME_THRESHOLD;
                     }).length;
                     const late = cpTimes.filter(c => {
                         let e = 0;
                         for(let i = 0; i <= c.cp; i++) e += active.cps[i].exp;
 						e -= (active.cps[c.cp].halt?.enabled ? active.cps[c.cp].halt.time / 60 : 0);
-                        return (c.time - e) * 60 > 10;
+                        return (c.time - e) * 60 > ON_TIME_THRESHOLD;
                     }).length;
 
                     const trip = {
@@ -397,7 +409,7 @@
                                 realTime: ct.real,
 								expectedClock: start + exp * 60000 + pauseTotal,
                                 diff: diff,
-                                status: diffSec < 10 ? 'ok' : diff < 0 ? 'early' : 'late',
+                                status: diffSec < ON_TIME_THRESHOLD ? 'ok' : diff < 0 ? 'early' : 'late',
                                 km: cp.dist || 0,
                                 segmentTime: segmentTime,
                                 rate: segmentRate,
@@ -456,7 +468,7 @@
 				return {
 					diff: Math.abs(d), 
 					diffSeconds: diffInSeconds,
-					stat: diffInSeconds < 10 ? 'ok' : d < 0 ? 'early' : 'late'
+					stat: diffInSeconds < ON_TIME_THRESHOLD ? 'ok' : d < 0 ? 'early' : 'late'
 				};
 			};
 
@@ -489,7 +501,7 @@
 						e -= (active.cps[i].halt?.enabled ? active.cps[i].halt.time / 60 : 0);
 						const expectedPercent = (e / totalExp) * 100;
 						const diffInSeconds = Math.abs(rec.time - e) * 60;
-						if(diffInSeconds < 10) {
+						if(diffInSeconds < ON_TIME_THRESHOLD) {
 							overlayColor = 'bg-green-500';
 						} else if(actualPercent < expectedPercent) {
 							overlayColor = 'bg-blue-500';
@@ -613,199 +625,205 @@
 			};
 
             if(active) {
-                const nextCp = curr < active.cps.length ? active.cps[curr] : null;
-                const isNextRegistered = cpTimes.find(t => t.cp === curr);
-                
-                return <div className="min-h-screen bg-neutral-100 p-4">
-                    <div className="max-w-2xl mx-auto">
-						<div className="bg-white rounded-md shadow-sm p-6 mb-4">
-							<div className="flex justify-between mb-4">
-								<div>
-									<h2 className="text-2xl font-semibold">{active.name}</h2>
-									<div className="text-sm text-gray-600">{active.cps[0]?.name} → {active.cps[active.cps.length - 1]?.name}</div>
-								</div>
-							</div>
+				const nextCp = curr < active.cps.length ? active.cps[curr] : null;
+				const isNextRegistered = cpTimes.find(t => t.cp === curr);
+				const totalKm = active.cps.reduce((s,c) => s + (c.dist || 0), 0);
+				const totalExp = active.cps.reduce((s,c) => s + c.exp, 0);
 
-							<div className="grid grid-cols-2 gap-4 text-sm">
+				// Last registered checkpoint status
+				const lastRec = cpTimes.length > 1 ? cpTimes[cpTimes.length - 1] : null;
+				const lastStat = lastRec ? getStat(lastRec.cp) : null;
+
+				// Next stop info
+				const nextI = curr;
+				let nextExp = 0;
+				for(let j = 0; j <= nextI; j++) nextExp += active.cps[j].exp;
+				const nextTravelOnly = nextExp - (active.cps[nextI]?.halt?.enabled ? active.cps[nextI].halt.time / 60 : 0);
+				const prevExpNext = nextI > 0 ? active.cps.slice(0, nextI).reduce((s,c) => s + c.exp, 0) : 0;
+				const nextSegExp = nextTravelOnly - prevExpNext;
+				const nextSegKm = nextCp?.dist || 0;
+				const nextPlannedRate = nextSegKm > 0 ? (nextSegExp / nextSegKm).toFixed(2) : '-';
+
+				return <div className="min-h-screen bg-neutral-100">
+
+					{/* Title Component */}
+					<div className="bg-white px-4 pt-4 pb-3 shadow-sm">
+						<div className="flex justify-between items-start">
+							<div>
+								<h2 className="text-lg font-semibold">{active.name}</h2>
+								<p className="text-xs text-gray-500">{active.cps[0]?.name} → {active.cps[active.cps.length - 1]?.name}</p>
+							</div>
+							<div className="text-right">
+								<div className="text-sm font-mono font-semibold text-blue-500">{fmtRel(totalExp)}</div>
+								<div className="text-xs text-gray-500">{totalKm.toFixed(2)} km</div>
+							</div>
+						</div>
+					</div>
+
+					<div className="p-4 space-y-3 max-w-2xl mx-auto">
+
+						{/* Top Card */}
+						<div className="bg-white rounded-md shadow-sm p-4">
+							<div className="flex justify-between items-start">
 								<div>
-									<div className="text-xs text-neutral-500">Duration</div>
-									<div className="font-mono text-lg text-blue-500">
+									<div className="font-mono text-3xl font-bold text-blue-500">
 										{fmt(now - start - pauseTotal)}
 									</div>
+									{lastStat && (
+										<div className={`text-xs font-medium mt-1 flex items-center gap-1 ${
+											lastStat.stat === 'ok' ? 'text-green-600' :
+											lastStat.stat === 'early' ? 'text-blue-600' : 'text-red-600'
+										}`}>
+											{lastStat.stat === 'ok' && <>{Icons.onTime} On Time</>}
+											{lastStat.stat === 'early' && <>{Icons.early} Early by {fmtTime(lastStat.diff)}</>}
+											{lastStat.stat === 'late' && <>{Icons.late} Late by {fmtTime(lastStat.diff)}</>}
+										</div>
+									)}
+									{!lastStat && (
+										<div className="text-xs text-gray-400 mt-1">No checkpoints registered yet</div>
+									)}
 								</div>
-
-								<div>
-									<div className="text-xs text-neutral-500">Clock</div>
-									<div className="font-mono text-lg text-blue-500">
-										{fmtReal(now)}
+								<div className="flex gap-2">
+									<IconButton
+										icon={paused ? "play" : "pause"}
+										onClick={togglePause}
+										bg="bg-blue-500"
+										color="text-white"
+									/>
+									<div className="relative">
+										<IconButton
+											icon="options"
+											onClick={() => setRouteMenu('active')}
+											bg="bg-neutral-100"
+											color="text-neutral-600"
+										/>
 									</div>
 								</div>
-
-								<div>
-									<div className="text-xs text-neutral-500">Expected Duration</div>
-									<div className="font-mono text-lg text-blue-500">
-										{fmtRel(active.cps.reduce((s,c)=>s+c.exp,0))}
-									</div>
-								</div>
-
-								<div>
-									<div className="text-xs text-neutral-500">Expected Clock</div>
-									<div className="font-mono text-lg text-blue-500">
-										{getExp(active.cps.length - 1)}
-									</div>
-								</div>
-							</div>
-							<div className="flex gap-2 mt-4">
-								<IconButton 
-									icon={paused ? "play" : "pause"} 
-									onClick={togglePause}
-									bg="bg-blue-500"
-									color="text-white"
-								/>
-
-								<IconButton 
-									icon="stop" 
-									onClick={stopRoute}
-									bg="bg-red-500"
-									color="text-white"
-								/>
 							</div>
 						</div>
 
+						{/* Active route options bottom sheet */}
+						{routeMenu === 'active' && (
+							<div className="fixed inset-0 z-50 flex flex-col justify-end">
+								<div className="absolute inset-0 bg-black opacity-30" onClick={() => setRouteMenu(null)}/>
+								<div className="relative bg-white rounded-t-2xl shadow-xl pb-8">
+									<div className="px-6 py-4 border-b border-neutral-100">
+										<div className="w-10 h-1 bg-neutral-300 rounded-full mx-auto mb-4"/>
+										<h3 className="text-base font-semibold">{active.name}</h3>
+									</div>
+									<div className="px-4 pt-2">
+										<button
+											onClick={() => { stopRoute(); setRouteMenu(null); }}
+											className="w-full flex items-center gap-4 px-4 py-4 hover:bg-neutral-50 rounded-md"
+										>
+											<span className="text-red-500">{Icons.stop}</span>
+											<span className="text-sm text-red-500">Stop</span>
+										</button>
+										<button
+											onClick={() => { setActive(null); setRouteMenu(null); }}
+											className="w-full flex items-center gap-4 px-4 py-4 hover:bg-neutral-50 rounded-md"
+										>
+											<span className="text-neutral-600">{Icons.close}</span>
+											<span className="text-sm">Cancel</span>
+										</button>
+										<button
+											onClick={() => { startRoute(active); setRouteMenu(null); }}
+											className="w-full flex items-center gap-4 px-4 py-4 hover:bg-neutral-50 rounded-md"
+										>
+											<span className="text-neutral-600">{Icons.play}</span>
+											<span className="text-sm">Restart</span>
+										</button>
+										<button
+											className="w-full flex items-center gap-4 px-4 py-4 hover:bg-neutral-50 rounded-md opacity-40"
+										>
+											<span className="text-neutral-600">{Icons.check}</span>
+											<span className="text-sm">Start From (coming soon)</span>
+										</button>
+									</div>
+								</div>
+							</div>
+						)}
 
-                        <ProgressBar />
+						{/* Mid Card — Progress Bar */}
+						<div className="relative">
+							<ProgressBar />
+							<div className="absolute top-2 right-2 bg-white border border-neutral-200 rounded-md px-2 py-1 text-xs text-right shadow-sm">
+								<div className="text-neutral-400">GPS</div>
+								<div className="text-neutral-300">—</div>
+								<div className="text-neutral-400 mt-1">Seg</div>
+								<div className="font-mono text-blue-500">
+									{(() => {
+										const cp = active.cps[curr];
+										if(!cp || cp.dist === 0) return '—';
+										let exp = 0;
+										for(let j = 0; j <= curr; j++) exp += active.cps[j].exp;
+										const travelOnly = exp - (cp.halt?.enabled ? cp.halt.time / 60 : 0);
+										const prevExp = active.cps.slice(0, curr).reduce((s,c) => s + c.exp, 0);
+										const segExp = travelOnly - prevExp;
+										return (segExp / cp.dist).toFixed(2);
+									})()}
+								</div>
+							</div>
+						</div>
 
-                        {haltActive && (() => {
+						{/* Halt Card */}
+						{haltActive && (() => {
 							const haltCp = active.cps[curr - 1];
 							let expHaltEnd = 0;
 							for(let j = 0; j < curr; j++) expHaltEnd += active.cps[j].exp;
-							const pt = pauseTotal;
 							return (
-							<div className="bg-white border border-blue-300 rounded-md shadow-sm p-6 mb-4 ring-4 ring-blue-400">
-								<div className="flex justify-between items-start">
-									<div>
-										<div className="text-blue-500 text-sm opacity-90">Halt</div>
-										<h3 className="text-lg font-semibold mb-3">{haltCp.name}</h3>
-										<div className="grid grid-cols-2 gap-4 text-sm">
-											<div>
-												<div className="text-xs text-neutral-500">Exp Clock</div>
-												<div className="font-mono text-lg text-blue-500">{fmtReal(start + expHaltEnd * 60000 + pauseTotal)}</div>
-											</div>
-											<div>
-												<div className="text-xs text-neutral-500">Exp Timer</div>
-												<div className="font-mono text-lg text-blue-500">{fmtRel(expHaltEnd)}</div>
-											</div>
-										</div>
+							<div className="bg-white border border-blue-300 rounded-md shadow-sm p-4 ring-2 ring-blue-400">
+								<div className="text-blue-500 text-xs mb-2">Halt — {haltCp.name}</div>
+								<div className="flex justify-between items-center">
+									<div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
+										<div className="text-neutral-400">Exp Clock</div>
+										<div className="text-neutral-400">Exp Timer</div>
+										<div className="font-mono text-blue-500">{fmtReal(start + expHaltEnd * 60000 + pauseTotal)}</div>
+										<div className="font-mono text-blue-500">{fmtRel(expHaltEnd)}</div>
 									</div>
 									{!paused && (
-										<IconButton
-											icon="check"
-											onClick={depart}
-											bg="bg-blue-500"
-											color="text-white"
-										/>
+										<IconButton icon="check" onClick={depart} bg="bg-blue-500" color="text-white"/>
 									)}
 								</div>
 							</div>
 							);
 						})()}
 
-						{!haltActive && nextCp && !isNextRegistered && (() => {
-							const i = curr;
-
-							let exp = 0;
-							for(let j = 0; j <= i; j++) exp += active.cps[j].exp;
-							const travelOnly = exp - (active.cps[i].halt?.enabled ? active.cps[i].halt.time / 60 : 0);
-
-							const prevExp = i > 0 ? active.cps.slice(0, i).reduce((s,c)=>s+c.exp,0) : 0;
-							const segmentExp = travelOnly - prevExp;
-
-							const totalKm = active.cps.slice(0, i+1).reduce((s,c)=>s+(c.dist||0),0);
-							const segmentKm = nextCp.dist || 0;
-
-							const plannedRate = segmentKm > 0 ? (segmentExp / segmentKm).toFixed(2) : '-';
-
-							return (
-							<div className="bg-white border border-neutral-300 rounded-md shadow-sm p-6 mb-4 ring-4 ring-blue-500">
-								<div className="flex justify-between items-start">
-									<div>
-										<div className="text-blue-500 text-sm opacity-90">Next Stop</div>
-
-										<div className="flex items-center gap-2 mb-2">
-											<span className="text-sm opacity-80">#{i}</span>
-											<h3 className="text-lg font-semibold">{nextCp.name}</h3>
-										</div>
-
-										<div className="grid grid-cols-3 gap-4  text-sm">
-											<div>
-												<div className="text-xs text-neutral-500">
-												Seg Dist: 
-												</div>
-												<div className="font-mono text-lg text-blue-500">
-												{segmentKm} km
-												</div>
-												<div className="text-xs text-neutral-500">
-												Total Dist: 
-												</div>
-												<div className="font-mono text-lg text-blue-500">
-												{totalKm.toFixed(2)} km
-												</div>
-											</div>
-											<div>
-												<div className="text-xs text-neutral-500">
-												Exp Duration: 
-												</div>
-												<div className="font-mono text-lg text-blue-500">
-												{fmtRel(travelOnly)}
-												</div>
-												<div className="text-xs text-neutral-500">
-												Exp Time: 
-												</div>
-												<div className="font-mono text-lg text-blue-500">
-												{fmtReal(start + travelOnly * 60000 + pauseTotal)}
-												</div>
-											</div>
-											<div>
-												<div className="text-xs text-neutral-500">
-												Rate: 
-												</div>
-												<div className="font-mono text-lg text-blue-500">
-												{plannedRate} min/km
-												</div>
-											</div>
-										</div>
+						{/* Bottom Card — Next Stop */}
+						{!haltActive && nextCp && !isNextRegistered && (
+							<div className="bg-white border border-neutral-200 rounded-md shadow-sm p-4 ring-2 ring-blue-400">
+								<div className="grid grid-cols-2 gap-2">
+									<div className="font-mono text-lg text-blue-500">{fmtReal(now)}</div>
+									<div className="flex justify-end">
+										{!paused && (
+											<IconButton icon="check" onClick={reg} bg="bg-blue-500" color="text-white"/>
+										)}
 									</div>
-
-									{!paused && (
-										<IconButton 
-											icon="check" 
-											onClick={reg}
-											bg="bg-blue-500"
-											color="text-white"
-										/>
-									)}
+									<div className="font-mono text-sm text-neutral-500">{fmtReal(start + nextTravelOnly * 60000 + pauseTotal)}</div>
+									<div className="text-sm font-semibold text-right">
+										<span className="text-xs text-neutral-400 mr-1">#{nextI}</span>
+										{nextCp.name}
+									</div>
+									<div className="text-xs text-neutral-500">{fmtRel(nextSegExp)}</div>
+									<div className="text-xs text-neutral-500 text-right">{nextSegKm} km</div>
 								</div>
 							</div>
-							);
-						})()}
+						)}
 
-                        <div className="space-y-2">
-                            {active.cps.map((c, i) => {
+						{/* Checkpoint List */}
+						<div className="space-y-0">
+							{active.cps.map((c, i) => {
 								const rec = cpTimes.find(t => t.cp === i);
 								const s = getStat(i);
 
 								let exp = 0;
 								for(let j = 0; j <= i; j++) exp += active.cps[j].exp;
 								const travelOnly = exp - (active.cps[i].halt?.enabled ? active.cps[i].halt.time / 60 : 0);
-
-								const prevExp = i > 0 ? active.cps.slice(0, i).reduce((s,c)=>s+c.exp,0) : 0;
+								const prevExp = i > 0 ? active.cps.slice(0, i).reduce((s,c) => s + c.exp, 0) : 0;
 								const segmentExp = travelOnly - prevExp;
-
-								const totalKm = active.cps.slice(0, i+1).reduce((s,c)=>s+(c.dist||0),0);
+								const totalKmCp = active.cps.slice(0, i+1).reduce((s,c) => s + (c.dist||0), 0);
 								const segmentKm = c.dist || 0;
-
 								const plannedRate = segmentKm > 0 ? (segmentExp / segmentKm).toFixed(2) : '-';
-
 								const prevRec = i > 0 ? cpTimes.find(t => t.cp === i - 1) : null;
 								const prevTime = prevRec
 									? (prevRec.haltActual !== undefined ? prevRec.time + prevRec.haltActual : prevRec.time)
@@ -814,73 +832,20 @@
 									? ((rec.time - prevTime) / segmentKm).toFixed(2)
 									: null;
 
-								const nextCp = active.cps[i + 1];
-								const showToggle = c.type !== 'start' && c.subPoints?.length > 0;
+								const isLast = i === active.cps.length - 1;
+								const showSubToggle = c.type !== 'start' && c.subPoints?.length > 0;
 
-								const cpCard = c.type === 'start' ? (
-									<div key={i} className="bg-white rounded-md shadow p-3">
-										<div className="flex justify-between items-center">
-											<div>
-												<div className="flex items-center gap-2">
-													<span className="text-xs text-neutral-500">#0</span>
-													<span className="text-lg font-semibold">{c.name}</span>
-												</div>
-												<div className="text-xs text-neutral-500">0.00 km</div>
-											</div>
-											<div className="text-right text-xs text-neutral-500">
-												<div>{fmtReal(start)}</div>
-												<div className="font-mono">00:00:00</div>
-												<div className="text-green-600 font-medium">Start</div>
-											</div>
-										</div>
-									</div>
-								) : (
-									<div key={i} className="bg-white rounded-md shadow p-3">
-										<div className="flex justify-between items-center">
-											<div>
-												<div className="flex items-center gap-2">
-													<span className="text-xs text-neutral-500">#{i}</span>
-													<span className="text-lg font-semibold">{c.name}</span>
-												</div>
-												<div className="text-xs text-neutral-500">
-													{segmentKm} km • Total: {totalKm.toFixed(2)} KM
-												</div>
-												<div className="text-xs text-neutral-500">
-													Rate: {plannedRate} min/km
-													{registeredRate && ` • Actual: ${registeredRate}`}
-												</div>
-											</div>
-											<div className="text-right text-xs text-neutral-500">
-												<div>Exp: {fmtRel(travelOnly)}</div>
-												<div className="text-neutral-500">{fmtReal(start + travelOnly * 60000 + pauseTotal)}</div>
-												{rec && (
-													<>
-														<div>Reg: {fmtRel(rec.time)}</div>
-														<div className="text-neutral-500">{fmtReal(rec.real)}</div>
-													</>
-												)}
-												{s && (
-													<div className={`font-medium flex items-center gap-2 ${
-														s.stat === 'ok' ? 'text-green-600' :
-														s.stat === 'early' ? 'text-blue-700' : 'text-red-600'
-													}`}>
-														{s.stat === 'ok' && <>{Icons.onTime} On Time</>}
-														{s.stat === 'early' && <>{Icons.early} Early {fmtTime(s.diff)}</>}
-														{s.stat === 'late' && <>{Icons.late} Late {fmtTime(s.diff)}</>}
-													</div>
-												)}
-											</div>
-										</div>
-									</div>
-								);
-
-								const subPointBlock = showToggle ? (
+								const subPointBlock = showSubToggle ? (
 									<>
 										<div
-											className="text-center py-2 cursor-pointer text-xs text-neutral-400 hover:text-blue-500"
+											className="flex items-center justify-between px-4 py-1 cursor-pointer"
 											onClick={() => setExpandedSegments({...expandedSegments, [i]: !expandedSegments[i]})}
 										>
-											{expandedSegments[i] ? 'Hide Sub Points ▲' : `Sub Points (${c.subPoints.length}) ▼`}
+											<div className="text-xs text-neutral-400">{fmtRel(segmentExp)}</div>
+											<div className="text-xs text-blue-400">
+												{expandedSegments[i] ? 'Hide ▲' : `Sub Points (${c.subPoints.length}) ▼`}
+											</div>
+											<div className="text-xs text-neutral-400">{segmentKm} km</div>
 										</div>
 										{expandedSegments[i] && (() => {
 											const segStartExp = (() => {
@@ -892,28 +857,81 @@
 											const parentDist = c.dist || 1;
 											const rate = parentTravelExp / parentDist;
 											let subCumDist = 0;
+											let prevSpExp = segStartExp;
 											return c.subPoints.map((sp, si) => {
 												subCumDist += sp.dist || 0;
 												const spExp = segStartExp + (subCumDist * rate);
+												const spSegTime = spExp - prevSpExp;
+												prevSpExp = spExp;
 												return (
-													<div key={si} className="bg-neutral-50 border border-neutral-200 rounded-md p-3 ml-4">
-														<div className="flex justify-between items-center">
-															<div>
-																<div className="text-xs text-neutral-400">Sub Point</div>
-																<div className="text-sm font-medium">{sp.name}</div>
-																<div className="text-xs text-neutral-400">{subCumDist.toFixed(2)} km into segment</div>
-															</div>
-															<div className="text-right text-xs text-neutral-500">
-																<div>{fmtRel(spExp)}</div>
-																<div>{fmtReal(start + spExp * 60000 + pauseTotal)}</div>
-															</div>
+													<div key={si} className="flex items-center gap-2 px-6 py-2 bg-neutral-50 border-l-2 border-neutral-200 ml-6">
+														<div className="min-w-[56px]">
+															<div className="text-xs font-mono text-neutral-500">{fmtRel(spSegTime)}</div>
+															<div className="text-xs font-mono text-neutral-400">{fmtReal(start + spExp * 60000 + pauseTotal)}</div>
+														</div>
+														<div className="flex-1 text-center">
+															<div className="text-xs text-neutral-600 font-medium">{sp.name}</div>
+														</div>
+														<div className="text-right min-w-[48px]">
+															<div className="text-xs text-neutral-400">{(sp.dist || 0).toFixed(2)} km</div>
+															<div className="text-xs text-neutral-500 font-medium">{(active.cps.slice(0, i).reduce((s,c) => s + (c.dist||0), 0) + subCumDist).toFixed(2)} km</div>
 														</div>
 													</div>
 												);
 											});
 										})()}
 									</>
-								) : null;
+								) : (
+									i > 0 && (
+										<div className="flex items-center justify-between px-4 py-1">
+											<div className="text-xs text-neutral-400">{fmtRel(segmentExp)}</div>
+											<div className="text-xs text-neutral-300">—</div>
+											<div className="text-xs text-neutral-400">{segmentKm} km</div>
+										</div>
+									)
+								);
+
+								const cpCard = (
+									<div className={`bg-white rounded-md px-4 py-3 ${i === curr && !rec ? 'opacity-50' : ''}`}>
+										<div className="flex items-start justify-between">
+											<div className="flex items-start gap-3">
+												<div className="text-right min-w-[56px]">
+													<div className="text-xs font-mono text-neutral-500">{fmtReal(start + travelOnly * 60000 + pauseTotal)}</div>
+													{rec && <div className="text-xs font-mono text-blue-500">({fmtReal(rec.real)})</div>}
+												</div>
+												<div>
+													<div className="flex items-center gap-1">
+														<span className="text-xs text-neutral-400">#{i}</span>
+														<span className="text-sm font-semibold">{c.name}</span>
+													</div>
+													{s && (
+														<div className={`text-xs flex items-center gap-1 ${
+															s.stat === 'ok' ? 'text-green-600' :
+															s.stat === 'early' ? 'text-blue-600' : 'text-red-600'
+														}`}>
+															{s.stat === 'ok' && <>{Icons.onTime} On Time</>}
+															{s.stat === 'early' && <>{Icons.early} Early {fmtTime(s.diff)}</>}
+															{s.stat === 'late' && <>{Icons.late} Late {fmtTime(s.diff)}</>}
+														</div>
+													)}
+												</div>
+											</div>
+											<div className="text-right min-w-[48px]">
+												<div className="text-xs font-mono text-neutral-500">{totalKmCp.toFixed(2)} km</div>
+												<div className="text-xs text-neutral-400">{plannedRate} min/km</div>
+												{rec && registeredRate && <div className="text-xs text-blue-400">{registeredRate} act</div>}
+											</div>
+										</div>
+										{c.halt?.enabled && rec && (
+											<div className="mt-2 pt-2 border-t border-neutral-100 flex justify-between text-xs text-neutral-400">
+												<span>Halt: {fmtRel(c.halt.time / 60)}</span>
+												{cpTimes.find(t => t.cp === i)?.haltActual !== undefined && (
+													<span>Actual: {fmtRel(cpTimes.find(t => t.cp === i).haltActual)}</span>
+												)}
+											</div>
+										)}
+									</div>
+								);
 
 								return (
 									<React.Fragment key={i}>
@@ -922,13 +940,13 @@
 									</React.Fragment>
 								);
 							})}
-								<div className="bg-white rounded-md p-3 text-sm">
-                                <div className="text-xs text-neutral-500">Total: {active.cps.reduce((s,c) => s + (c.dist || 0), 0).toFixed(2)} km</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>;
-            }
+							<div className="bg-white rounded-md p-3">
+								<div className="text-xs text-neutral-500">Total: {active.cps.reduce((s,c) => s + (c.dist || 0), 0).toFixed(2)} km</div>
+							</div>
+						</div>
+					</div>
+				</div>;
+			}
 
             if(creating) {
                 // Calculate cumulative times for preview
@@ -1504,75 +1522,106 @@
                             <button onClick={restoreFromSheets} className="px-4 py-2 border border-neutral-200 bg-neutral-100 text-sm text-neutral-900 rounded-md text-xs flex items-center gap-2">{Icons.restore} Restore</button>
                         </div>
                     </div>
-                    {routes.length === 0 ? 
-                        <div className="bg-white border border-neutral-200 rounded-md shadow-sm p-12 text-center">
-                            <h3 className="text-lg font-semibold mb-2">No Routes Yet</h3>
+                    {routes.length === 0 ?
+						<div className="bg-white border border-neutral-200 rounded-md shadow-sm p-12 text-center">
+							<h3 className="text-lg font-semibold mb-2">No Routes Yet</h3>
 							<div className="flex justify-center">
-                            <button onClick={() => setCreating(true)}
-							className="px-6 py-3 bg-blue-500 text-lg text-white rounded-md text-sm flex items-center gap-2">
-							{Icons.add} Create Route
-							</button>
-							</div>
-                        </div> :
-                        <div className="space-y-4">
-                            {routes.map(r => {
-                                const totalKm = r.cps.reduce((s,c) => s + (c.dist || 0), 0);
-                                return <div key={r.id} className="bg-white border border-neutral-200 rounded-md shadow-sm p-5">
-                                <div className="flex justify-between mb-3">
-                                    <div>
-                                        <h3 className="text-lg font-semibold">{r.name}</h3>
-                                        <p className="text-sm text-gray-600">{r.cps[0]?.name || '—'} → {r.cps[r.cps.length - 1]?.name || '—'}</p>
-                                        <p className="text-sm text-gray-600">{r.cps.length} checkpoints • {r.cps.reduce((s,c) => s + (c.exp || 0), 0).toFixed(2)} min • {totalKm.toFixed(2)} km</p>
-                                    </div>
-                                    <div className="flex gap-2">
-										<IconButton
-											icon="duplicate"
-											onClick={() => duplicateRoute(r)}
-											bg="bg-neutral-100"
-											color="text-blue-500"
-										/>
-										<IconButton
-											icon="flip"
-											onClick={() => flipRoute(r)}
-											bg="bg-neutral-100"
-											color="text-blue-500"
-										/>
-										<IconButton 
-											icon="edit"
-											onClick={() => {
-												setEditing(r);
-												setName(r.name);
-												setCps(r.cps.map(c => c.type === 'start'
-													? {name: c.name, type: 'start', dist: 0, exp: 0}
-													: {
-														name: c.name,
-														type: c.type,
-														time: c.type === 'fixed' ? ((c.exp - (c.halt?.enabled ? c.halt.time / 60 : 0)) * 60) : (c.time || 600),
-														dist: c.dist || 0,
-														rate: c.rate || 0,
-														halt: {enabled: c.halt?.enabled === true, time: c.halt?.time || 300},
-														subPoints: c.subPoints || []
-													  }
-												));
-												setCreating(true);
-											}}
-										/>
-
-										<IconButton 
-											icon="trash"
-											onClick={() => confirm('Delete?') && save(routes.filter(x => x.id !== r.id))}
-											color="text-red-500"
-										/>
-									</div>
-                                </div>
-                                <button onClick={() => startRoute(r)}
-								className="w-full px-4 py-3 border border-neutral-200 bg-neutral-100 text-blue-500 rounded-md text-sm flex items-center justify-center gap-2">
-								{Icons.play} Start Route
+								<button onClick={() => setCreating(true)}
+								className="px-6 py-3 bg-blue-500 text-lg text-white rounded-md text-sm flex items-center gap-2">
+								{Icons.add} Create Route
 								</button>
-                            </div>;
-                            })}
-                        </div>
-                    }
+							</div>
+						</div> :
+						<div className="space-y-3">
+							{routes.map(r => {
+								const totalKm = r.cps.reduce((s,c) => s + (c.dist || 0), 0);
+								const totalExp = r.cps.reduce((s,c) => s + (c.exp || 0), 0);
+								return (
+									<div key={r.id}
+										className="bg-white border border-neutral-200 rounded-md shadow-sm p-4 cursor-pointer active:bg-neutral-50"
+										onClick={() => setView('routeview') & setViewRoute(r)}
+									>
+										<div className="flex items-center gap-3">
+											<div className="flex-1 min-w-0">
+												<h3 className="text-base font-semibold truncate">{r.name}</h3>
+												<p className="text-xs text-gray-500 truncate">{r.cps[0]?.name || '—'} → {r.cps[r.cps.length - 1]?.name || '—'}</p>
+												<p className="text-xs text-gray-500">{fmtRel(totalExp)} • {totalKm.toFixed(2)} km</p>
+											</div>
+											<button
+												onClick={e => { e.stopPropagation(); startRoute(r); }}
+												className="w-11 h-11 flex items-center justify-center rounded-md bg-blue-500 text-white flex-shrink-0 active:scale-95"
+											>
+												{Icons.play}
+											</button>
+											<button
+												onClick={e => { e.stopPropagation(); setRouteMenu(r); }}
+												className="w-11 h-11 flex items-center justify-center rounded-md bg-neutral-100 text-neutral-600 flex-shrink-0 active:scale-95"
+											>
+												{Icons.options}
+											</button>
+										</div>
+									</div>
+								);
+							})}
+						</div>
+					}
+
+					{/* Bottom sheet */}
+					{routeMenu && (
+						<div className="fixed inset-0 z-50 flex flex-col justify-end">
+							<div className="absolute inset-0 bg-black opacity-30" onClick={() => setRouteMenu(null)}/>
+							<div className="relative bg-white rounded-t-2xl shadow-xl pb-8">
+								<div className="px-6 py-4 border-b border-neutral-100">
+									<div className="w-10 h-1 bg-neutral-300 rounded-full mx-auto mb-4"/>
+									<h3 className="text-base font-semibold">{routeMenu.name}</h3>
+								</div>
+								<div className="px-4 pt-2">
+									<button
+										onClick={() => {
+											setEditing(routeMenu);
+											setName(routeMenu.name);
+											setCps(routeMenu.cps.map(c => c.type === 'start'
+												? {name: c.name, type: 'start', dist: 0, exp: 0}
+												: {name: c.name, type: c.type, time: c.type === 'fixed' ? ((c.exp - (c.halt?.enabled ? c.halt.time / 60 : 0)) * 60) : (c.time || 600), dist: c.dist || 0, rate: c.rate || 0, halt: {enabled: c.halt?.enabled === true, time: c.halt?.time || 300}, subPoints: c.subPoints || []}
+											));
+											setCreating(true);
+											setRouteMenu(null);
+										}}
+										className="w-full flex items-center gap-4 px-4 py-4 hover:bg-neutral-50 rounded-md"
+									>
+										<span className="text-neutral-600">{Icons.edit}</span>
+										<span className="text-sm">Edit</span>
+									</button>
+									<button
+										onClick={() => { duplicateRoute(routeMenu); setRouteMenu(null); }}
+										className="w-full flex items-center gap-4 px-4 py-4 hover:bg-neutral-50 rounded-md"
+									>
+										<span className="text-neutral-600">{Icons.duplicate}</span>
+										<span className="text-sm">Duplicate</span>
+									</button>
+									<button
+										onClick={() => { flipRoute(routeMenu); setRouteMenu(null); }}
+										className="w-full flex items-center gap-4 px-4 py-4 hover:bg-neutral-50 rounded-md"
+									>
+										<span className="text-neutral-600">{Icons.flip}</span>
+										<span className="text-sm">Flip</span>
+									</button>
+									<button
+										onClick={() => {
+											if(confirm('Delete this route?')) {
+												save(routes.filter(x => x.id !== routeMenu.id));
+												setRouteMenu(null);
+											}
+										}}
+										className="w-full flex items-center gap-4 px-4 py-4 hover:bg-neutral-50 rounded-md"
+									>
+										<span className="text-red-500">{Icons.trash}</span>
+										<span className="text-sm text-red-500">Delete</span>
+									</button>
+								</div>
+							</div>
+						</div>
+					)}
                 </div>
             </div>;
         }

@@ -24,9 +24,9 @@
 </head>
 <body>
     <div id="root"></div>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
     <script type="text/babel">
         const { useState, useEffect } = React;
         
@@ -158,7 +158,7 @@
 			</button>
 		);
 		
-		const ON_TIME_THRESHOLD = 2; // seconds
+		const ON_TIME_THRESHOLD = 3; // seconds
 		
         function App() {
             const [routes, setRoutes] = useState([]);
@@ -184,6 +184,10 @@
 			const [routeMenu, setRouteMenu] = useState(null);
 			const [viewRoute, setViewRoute] = useState(null);
 			const [showStartFrom, setShowStartFrom] = useState(false);
+			const [scheduledStart, setScheduledStart] = useState(null);
+			const [useScheduledStart, setUseScheduledStart] = useState(false);
+			const [actualTapTime, setActualTapTime] = useState(null);
+			const [wasScheduled, setWasScheduled] = useState(false);
 
             useEffect(() => {
                 const s = localStorage.getItem('routes');
@@ -198,6 +202,23 @@
 					return () => clearInterval(i);
 				}
 			}, [active, paused, view]);
+			
+			useEffect(() => {
+				let wakeLock = null;
+				const requestWakeLock = async () => {
+					if('wakeLock' in navigator && active) {
+						try {
+							wakeLock = await navigator.wakeLock.request('screen');
+						} catch(err) {
+							console.log('Wake lock failed:', err);
+						}
+					}
+				};
+				requestWakeLock();
+				return () => {
+					if(wakeLock) wakeLock.release();
+				};
+			}, [active]);
 
             const save = r => { setRoutes(r); localStorage.setItem('routes', JSON.stringify(r)); };
             const saveHistory = h => { setHistory(h); localStorage.setItem('history', JSON.stringify(h)); };
@@ -311,7 +332,24 @@
 						dist: donor.dist || 0,
 						rate: donor.rate || 0,
 						time: donor.time || 0,
-						subPoints: donor.type !== 'start' ? [...(donor.subPoints || [])].reverse() : [],
+						subPoints: donor.type !== 'start' ? (() => {
+							const sps = donor.subPoints || [];
+							if(sps.length === 0) return [];
+							const totalDist = donor.dist || 0;
+							// Build cumulative distances from original start
+							let cum = 0;
+							const cumArr = sps.map(sp => {
+								cum += sp.dist || 0;
+								return cum;
+							});
+							// Reverse cumulative positions and calculate new segment distances
+							const revCum = [...cumArr].reverse().map(c => totalDist - c);
+							const reversedSps = [...sps].reverse();
+							return reversedSps.map((sp, si) => ({
+								...sp,
+								dist: parseFloat((revCum[si] - (si > 0 ? revCum[si - 1] : 0)).toFixed(6))
+							}));
+						})() : [],
 						halt: c.halt
 					};
 				});
@@ -325,10 +363,14 @@
 			};
             const startRoute = r => {
 				const now = Date.now();
-				setActive(r); setStart(now); setCurr(1);
-				setCpTimes([{cp: 0, time: 0, real: now}]);
+				const actualStart = (useScheduledStart && scheduledStart) ? scheduledStart : now;
+				setActualTapTime(now);
+				setWasScheduled(useScheduledStart && !!scheduledStart);
+				setActive(r); setStart(actualStart); setCurr(1);
+				setCpTimes([{cp: 0, time: 0, real: actualStart}]);
 				setPaused(false); setPauseTotal(0); setPauseStart(null); setNow(now);
 				setHaltActive(false); setHaltStart(null);
+				setUseScheduledStart(false); setScheduledStart(null);
 			};
 
             const togglePause = () => {
@@ -389,6 +431,7 @@
 				setHaltStart(null);
 				setShowStartFrom(false);
 				setRouteMenu(null);
+				setActualTapTime(null);
 			};
 
             const stopRoute = () => {
@@ -460,6 +503,8 @@
                     saveHistory([trip, ...history]);
                 }
                 setActive(null);
+				setActualTapTime(null);
+				setWasScheduled(false);
             };
 
             const fmt = ms => {
@@ -511,7 +556,7 @@
 
             const ProgressBar = () => {
 				const totalExp = active.cps.reduce((s, c) => s + c.exp, 0);
-				const elapsed = (now - start - pauseTotal) / 60000;
+				const elapsed = Math.max(0, (now - start - pauseTotal) / 60000);
 				const timeProgress = Math.min((elapsed / totalExp) * 100, 100);
 				const WINDOW = Math.max(1, Math.min(5, totalExp / 4)); // minutes on each side of NOW
 
@@ -890,7 +935,7 @@
 							<div className="flex justify-between items-start">
 								<div>
 									<div className="font-mono text-3xl font-bold text-blue-500">
-										{fmt(now - start - pauseTotal)}
+										{fmt(Math.max(0, now - start - pauseTotal))}
 									</div>
 									{lastStat && (
 										<div className={`text-xs font-medium mt-1 flex items-center gap-1 ${
@@ -1147,14 +1192,22 @@
 											<div className="flex items-start gap-3">
 												<div className="text-right min-w-[56px]">
 													<div className="text-xs font-mono text-neutral-500">{fmtReal(start + travelOnly * 60000 + pauseTotal)}</div>
-													{rec && <div className="text-xs font-mono text-blue-500">({fmtReal(rec.real)})</div>}
+													{rec && <div className="text-xs font-mono text-blue-500">({fmtReal(c.type === 'start' && actualTapTime ? actualTapTime : rec.real)})</div>}
 												</div>
 												<div>
 													<div className="flex items-center gap-1">
 														<span className="text-xs text-neutral-400">#{i}</span>
 														<span className="text-sm font-semibold">{c.name}</span>
 													</div>
-													{s && (
+													{c.type === 'start' && (() => {
+														if(!actualTapTime || !wasScheduled) return <div className="text-xs text-green-600 font-medium">Start</div>;
+														const delayMin = (actualTapTime - start) / 60000;
+														const delaySec = Math.abs(delayMin) * 60;
+														if(delaySec < ON_TIME_THRESHOLD) return <div className="text-xs text-green-600 font-medium flex items-center gap-1">{Icons.onTime} On Time</div>;
+														if(delayMin > 0) return <div className="text-xs text-red-500 font-medium flex items-center gap-1">{Icons.late} Late {fmtTime(delayMin)}</div>;
+														return <div className="text-xs text-blue-500 font-medium flex items-center gap-1">{Icons.early} Early {fmtTime(Math.abs(delayMin))}</div>;
+													})()}
+													{s && c.type !== 'start' && (
 														<div className={`text-xs flex items-center gap-1 ${
 															s.stat === 'ok' ? 'text-green-600' :
 															s.stat === 'early' ? 'text-blue-600' : 'text-red-600'
@@ -1246,7 +1299,7 @@
 				const r = viewRoute;
 				const totalKm = r.cps.reduce((s,c) => s + (c.dist || 0), 0);
 				const totalExp = r.cps.reduce((s,c) => s + c.exp, 0);
-				const hypotheticalStart = now - (now % 1000); // current time as start
+				const hypotheticalStart = (useScheduledStart && scheduledStart) ? scheduledStart : now - (now % 1000);
 
 				return <div className="min-h-screen bg-neutral-100">
 
@@ -1262,12 +1315,48 @@
 								<div className="text-xs text-gray-500">{totalKm.toFixed(2)} km</div>
 							</div>
 						</div>
+						{/* Scheduled Start Toggle */}
+						<div className="mt-3 flex items-center justify-between py-2 border-t border-neutral-100">
+							<span className="text-xs text-neutral-500">Scheduled Start</span>
+							<div className="flex items-center gap-2">
+								{useScheduledStart && (
+									<input
+										type="time"
+										value={scheduledStart ? new Date(scheduledStart).toTimeString().slice(0,5) : ''}
+										onChange={e => {
+											if(!e.target.value) return;
+											const [h, m] = e.target.value.split(':').map(Number);
+											const d = new Date();
+											d.setHours(h, m, 0, 0);
+											setScheduledStart(d.getTime());
+										}}
+										className="px-2 py-1 border border-neutral-200 rounded-md text-xs font-mono"
+									/>
+								)}
+								<button
+									onClick={() => {
+										if(!useScheduledStart) {
+											const d = new Date();
+											d.setSeconds(0, 0);
+											setScheduledStart(d.getTime());
+										} else {
+											setScheduledStart(null);
+										}
+										setUseScheduledStart(!useScheduledStart);
+									}}
+									className={`px-3 py-1 rounded-full text-xs ${useScheduledStart ? 'bg-blue-500 text-white' : 'bg-neutral-100 text-gray-500'}`}
+								>
+									{useScheduledStart ? 'On' : 'Off'}
+								</button>
+							</div>
+						</div>
+
 						<div className="flex gap-2 mt-3">
 							<button
 								onClick={() => { startRoute(r); setView('routes'); }}
 								className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-md text-sm flex items-center justify-center gap-2"
 							>
-								{Icons.play} Start
+								{Icons.play} {useScheduledStart && scheduledStart ? `Start at ${new Date(scheduledStart).toTimeString().slice(0,5)}` : 'Start'}
 							</button>
 							<button
 								onClick={() => setView('routes')}
@@ -1439,12 +1528,11 @@
                 return <div className="min-h-screen bg-neutral-100 p-4">
                     <div className="max-w-2xl mx-auto bg-white rounded-md shadow-sm p-6">
                         <div className="flex justify-between items-center mb-6">
-                            <h2 className="text-2xl font-semibold">{editing ? 'Edit' : 'Create'} Route</h2>
-                            <div className="text-right">
-                                <div className="text-sm text-gray-600">Start</div>
-                                <div className="font-mono text-lg text-blue-700">00:00:00</div>
-                            </div>
-                        </div>
+							<h2 className="text-2xl font-semibold">{editing ? 'Edit' : 'Create'} Route</h2>
+							<div className="text-right">
+								<div className="font-mono text-lg text-blue-700">00:00:00</div>
+							</div>
+						</div>
                         <input value={name} onChange={e => setName(e.target.value)} placeholder="Route Name" className="w-full px-4 py-2 border rounded-3xl text-xs mb-2"/>
                         <div className="mb-4">
                             <div className="flex justify-between mb-3">

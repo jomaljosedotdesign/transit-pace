@@ -160,6 +160,16 @@
 		
 		const ON_TIME_THRESHOLD = 3; // seconds
 		
+		const haversineKm = (lat1, lon1, lat2, lon2) => {
+			const R = 6371;
+			const dLat = (lat2 - lat1) * Math.PI / 180;
+			const dLon = (lon2 - lon1) * Math.PI / 180;
+			const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+				Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+				Math.sin(dLon/2) * Math.sin(dLon/2);
+			return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+		};
+		
         function App() {
             const [routes, setRoutes] = useState([]);
             const [history, setHistory] = useState([]);
@@ -188,6 +198,13 @@
 			const [useScheduledStart, setUseScheduledStart] = useState(false);
 			const [actualTapTime, setActualTapTime] = useState(null);
 			const [wasScheduled, setWasScheduled] = useState(false);
+			const [gpsRate, setGpsRate] = useState(null);
+			const [gpsSegmentPositions, setGpsSegmentPositions] = useState([]);
+			const gpsSegmentPositionsRef = React.useRef([]);
+			const [gpsWatchId, setGpsWatchId] = useState(null);
+			const gpsSegmentStartRef = React.useRef(null);
+			const gpsWarmupRef = React.useRef(0);
+			const gpsLastValidRef = React.useRef(null);
 
             useEffect(() => {
                 const s = localStorage.getItem('routes');
@@ -219,6 +236,74 @@
 					if(wakeLock) wakeLock.release();
 				};
 			}, [active]);
+			
+			useEffect(() => {
+				if(!active || !navigator.geolocation) return;
+
+				if(paused) {
+					if(gpsWatchId !== null) {
+						navigator.geolocation.clearWatch(gpsWatchId);
+						setGpsWatchId(null);
+					}
+					return;
+				}
+
+				const MIN_ACCURACY = 50; // meters
+				const MIN_SEGMENT_DIST_KM = 0.01; // 10 meters minimum before showing rate
+
+				const id = navigator.geolocation.watchPosition(
+					pos => {
+						if(pos.coords.accuracy > MIN_ACCURACY) return;
+
+						// Warmup — skip first 5 fixes
+						gpsWarmupRef.current += 1;
+						if(gpsWarmupRef.current <= 5) return;
+
+						const newPoint = {
+							lat: pos.coords.latitude,
+							lon: pos.coords.longitude,
+							time: Date.now()
+						};
+
+						// Speed sanity check — discard if implies > 150 km/h
+						if(gpsLastValidRef.current) {
+							const dist = haversineKm(
+								gpsLastValidRef.current.lat, gpsLastValidRef.current.lon,
+								newPoint.lat, newPoint.lon
+							);
+							const timeDiffHr = (newPoint.time - gpsLastValidRef.current.time) / 3600000;
+							if(timeDiffHr > 0 && dist / timeDiffHr > 150) return;
+						}
+						gpsLastValidRef.current = newPoint;
+
+						const updated = [...gpsSegmentPositionsRef.current, newPoint];
+						gpsSegmentPositionsRef.current = updated;
+						setGpsSegmentPositions(updated);
+
+						if(updated.length < 2) return;
+
+						let totalDist = 0;
+						for(let i = 1; i < updated.length; i++) {
+							totalDist += haversineKm(
+								updated[i-1].lat, updated[i-1].lon,
+								updated[i].lat, updated[i].lon
+							);
+						}
+
+						if(totalDist < MIN_SEGMENT_DIST_KM) return;
+
+						const segmentElapsed = (Date.now() - (gpsSegmentStartRef.current || Date.now())) / 60000;
+						if(segmentElapsed > 0) {
+							setGpsRate(segmentElapsed / totalDist);
+						}
+					},
+					err => console.log('GPS error:', err),
+					{ enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+				);
+
+				setGpsWatchId(id);
+				return () => navigator.geolocation.clearWatch(id);
+			}, [active, paused]);
 
             const save = r => { setRoutes(r); localStorage.setItem('routes', JSON.stringify(r)); };
             const saveHistory = h => { setHistory(h); localStorage.setItem('history', JSON.stringify(h)); };
@@ -296,7 +381,7 @@
 					)
 				};
 				save(editing ? routes.map(r => r.id === route.id ? route : r) : [...routes, route]);
-				setCps([{name:'', type:'start', dist:0, exp:0}, {name:'', type:'fixed', time:600, dist:5, rate:2, halt:{enabled:false, time:300}}]); setCreating(false); setEditing(null);
+				setName(''); setCps([{name:'', type:'start', dist:0, exp:0}, {name:'', type:'fixed', time:600, dist:5, rate:2, halt:{enabled:false, time:300}, subPoints:[]}]); setCreating(false); setEditing(null);
 			};
 			const duplicateRoute = r => {
 				const copy = {
@@ -370,7 +455,13 @@
 				setCpTimes([{cp: 0, time: 0, real: actualStart}]);
 				setPaused(false); setPauseTotal(0); setPauseStart(null); setNow(now);
 				setHaltActive(false); setHaltStart(null);
+				setGpsRate(null);
+				gpsSegmentPositionsRef.current = [];
+				setGpsSegmentPositions([]);
+				gpsSegmentStartRef.current = Date.now();
 				setUseScheduledStart(false); setScheduledStart(null);
+				gpsWarmupRef.current = 0;
+				gpsLastValidRef.current = null;
 			};
 
             const togglePause = () => {
@@ -386,6 +477,15 @@
 				const t = (Date.now() - start - pauseTotal) / 60000;
 				const newCpTimes = [...cpTimes, {cp: curr, time: t, real: Date.now()}];
 				setCpTimes(newCpTimes);
+				// Soft reset — keep last position as new segment start
+				const lastPos = gpsSegmentPositionsRef.current;
+				const seed = lastPos.length > 0 ? [{...lastPos[lastPos.length - 1]}] : [];
+				gpsSegmentPositionsRef.current = seed;
+				setGpsSegmentPositions(seed);
+				gpsSegmentStartRef.current = Date.now();
+				setGpsRate(null);
+				gpsLastValidRef.current = null;
+				gpsWarmupRef.current = 5; // skip warmup for subsequent segments
 				if(active.cps[curr]?.halt?.enabled) {
 					setHaltActive(true);
 					setHaltStart(Date.now());
@@ -396,9 +496,19 @@
 			};
 			const depart = () => {
 				const haltActual = (Date.now() - haltStart) / 60000;
+				const departTime = (Date.now() - start - pauseTotal) / 60000;
 				setCpTimes(cpTimes.map(ct => ct.cp === curr - 1 ? {...ct, haltDepart: Date.now(), haltActual} : ct));
 				setHaltActive(false);
 				setHaltStart(null);
+				// Reset GPS segment from halt depart
+				const lastPos = gpsSegmentPositionsRef.current;
+				const seed = lastPos.length > 0 ? [{...lastPos[lastPos.length - 1]}] : [];
+				gpsSegmentPositionsRef.current = seed;
+				setGpsSegmentPositions(seed);
+				gpsSegmentStartRef.current = Date.now();
+				setGpsRate(null);
+				gpsLastValidRef.current = null;
+				gpsWarmupRef.current = 5; // skip warmup for subsequent segments
 			};
 			
 			const startFrom = (cpIndex) => {
@@ -432,6 +542,12 @@
 				setShowStartFrom(false);
 				setRouteMenu(null);
 				setActualTapTime(null);
+				setGpsRate(null);
+				gpsSegmentPositionsRef.current = [];
+				setGpsSegmentPositions([]);
+				gpsSegmentStartRef.current = nowMs;
+				gpsLastValidRef.current = null;
+				gpsWarmupRef.current = 5;
 			};
 
             const stopRoute = () => {
@@ -475,8 +591,10 @@
                             // Calculate segment time and rate
                             const prevCt = idx > 0 ? cpTimes[idx - 1] : null;
 							const prevTime = prevCt
-								? (prevCt.haltActual !== undefined ? prevCt.time + prevCt.haltActual : prevCt.time)
-								: 0;
+								? (prevCt.cp === 0 && wasScheduled && actualTapTime
+									? (actualTapTime - start) / 60000
+									: (prevCt.haltActual !== undefined ? prevCt.time + prevCt.haltActual : prevCt.time))
+								: (wasScheduled && actualTapTime ? (actualTapTime - start) / 60000 : 0);
 							const segmentTime = ct.time - prevTime;
 							const segmentRate = cp.dist > 0 ? (segmentTime / cp.dist).toFixed(2) : 0;
                             
@@ -505,6 +623,16 @@
                 setActive(null);
 				setActualTapTime(null);
 				setWasScheduled(false);
+				setGpsRate(null);
+				gpsSegmentPositionsRef.current = [];
+				setGpsSegmentPositions([]);
+				gpsSegmentStartRef.current = null;
+				gpsWarmupRef.current = 0;
+				gpsLastValidRef.current = null;
+				if(gpsWatchId !== null) {
+					navigator.geolocation.clearWatch(gpsWatchId);
+					setGpsWatchId(null);
+				}
             };
 
             const fmt = ms => {
@@ -535,7 +663,7 @@
 				for(let j = 0; j <= i; j++) {
 					e += active.cps[j].exp;
 				}
-				const pt = paused ? pauseTotal + (Date.now() - pauseStart) : pauseTotal;
+				const pt = paused ? pauseTotal + (now - pauseStart) : pauseTotal;
 				return fmtReal(start + e * 60000 + pt);
 			};
 
@@ -641,15 +769,12 @@
 					{/* Rate overlay */}
 					<div className="flex justify-end mb-2">
 						<div className="bg-neutral-50 border border-neutral-200 rounded-md px-2 py-1 text-xs text-right">
-							<div className="text-neutral-400">GPS</div>
-							<div className="text-neutral-300">—</div>
-							<div className="text-neutral-400 mt-1">Req</div>
-							<div className="font-mono text-blue-500">
-								{(() => {
-									const rec = cpTimes.length >= 1 ? cpTimes[cpTimes.length - 1] : null;
-									if(!rec) return '—';
-									const nextCpItem = active.cps[curr];
-									if(!nextCpItem || !nextCpItem.dist) return '—';
+							{(() => {
+								const rec = cpTimes.length >= 1 ? cpTimes[cpTimes.length - 1] : null;
+								const nextCpItem = active.cps[curr];
+								let reqRate = null;
+								let reqColor = 'text-blue-500';
+								if(rec && nextCpItem && nextCpItem.dist) {
 									let nextExp = 0;
 									for(let j = 0; j <= curr; j++) nextExp += active.cps[j].exp;
 									const nextTravelOnly = nextExp - (nextCpItem.halt?.enabled ? nextCpItem.halt.time / 60 : 0);
@@ -659,14 +784,29 @@
 											? (actualTapTime - start) / 60000
 											: rec.time);
 									const timeRemaining = nextTravelOnly - lastRecTime;
-									if(timeRemaining <= 0) return <span className="text-red-500">late</span>;
-									const req = (timeRemaining / nextCpItem.dist).toFixed(2);
-									const planned = nextCpItem.dist > 0 ? ((nextTravelOnly - active.cps.slice(0, curr).reduce((s,c) => s + c.exp, 0)) / nextCpItem.dist).toFixed(2) : null;
-									const diff = planned ? parseFloat(req) - parseFloat(planned) : 0;
-const color = Math.abs(diff) < 0.1 ? 'text-green-500' : diff > 0 ? 'text-blue-500' : 'text-red-500';
-									return <span className={color}>{req}</span>;
-								})()}
-							</div>
+									if(timeRemaining > 0) {
+										reqRate = timeRemaining / nextCpItem.dist;
+										const planned = (nextTravelOnly - active.cps.slice(0, curr).reduce((s,c) => s + c.exp, 0)) / nextCpItem.dist;
+										const diff = reqRate - planned;
+										reqColor = Math.abs(diff) < 0.05 ? 'text-green-500' : diff > 0 ? 'text-blue-500' : 'text-red-500';
+									}
+								}
+								const gpsColor = (() => {
+									if(!gpsRate || !reqRate) return 'text-blue-500';
+									const diff = gpsRate - reqRate;
+									return Math.abs(diff) < 0.05 ? 'text-green-500' : diff > 0 ? 'text-red-500' : 'text-blue-500';
+								})();
+								return <>
+									<div className="text-neutral-400">GPS</div>
+									<div className={`font-mono ${gpsColor}`}>
+										{gpsRate ? gpsRate.toFixed(2) : <span className="text-neutral-300">—</span>}
+									</div>
+									<div className="text-neutral-400 mt-1">Req</div>
+									<div className={`font-mono ${reqColor}`}>
+										{reqRate ? reqRate.toFixed(2) : (rec && nextCpItem ? <span className="text-red-500">late</span> : '—')}
+									</div>
+								</>;
+							})()}
 						</div>
 					</div>
 

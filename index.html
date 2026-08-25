@@ -10,7 +10,7 @@
 	<link rel="manifest" href="./manifest.json">
 	<link rel="icon" href="./favicon.png">
 	<link rel="apple-touch-icon" href="./icon-192.png">
-    <title>Transit Timer</title>
+    <title>Transit Pace</title>
     <script src="https://cdn.tailwindcss.com"></script>
 	<style>
 		@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
@@ -322,7 +322,7 @@
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `transit-timer-backup-${new Date().toISOString().split('T')[0]}.json`;
+                a.download = `transit-pace-backup-${new Date().toISOString().split('T')[0]}.json`;
                 a.click();
                 URL.revokeObjectURL(url);
                 alert('Backup downloaded!');
@@ -2443,7 +2443,7 @@
                     <div className="bg-white rounded-md shadow-sm p-6 mb-6">
                         <div className="flex justify-between items-center mb-4">
                             <div>
-                                <h1 className="text-2xl font-semibold">Transit Timer</h1>
+                                <h1 className="text-2xl font-semibold">Transit Pace</h1>
                                 <p className="text-sm text-gray-600">Track your route timing</p>
                             </div>
 							<IconButton 

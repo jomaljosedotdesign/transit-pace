@@ -1,7 +1,7 @@
 {
   "name": "Transit Pace Tracker",
-  "short_name": "TP",
-  "description": "A tracker for transit",
+  "short_name": "Transit Pace",
+  "description": "A tracker for transit routes",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

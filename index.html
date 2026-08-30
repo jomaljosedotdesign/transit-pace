@@ -222,18 +222,15 @@
 			useEffect(() => {
 				if(!active) return;
 
-				// Push two dummy states so we have buffer
-				window.history.pushState({activeRoute: true}, '');
 				window.history.pushState({activeRoute: true}, '');
 
 				const handlePopState = () => {
+					// Immediately push state back before showing confirm
+					// so the stack is always maintained
+					window.history.pushState({activeRoute: true}, '');
 					const answer = confirm('Stop the current route and exit?');
 					if(answer) {
 						stopRouteRef.current();
-					} else {
-						// Always maintain two states in stack
-						window.history.pushState({activeRoute: true}, '');
-						window.history.pushState({activeRoute: true}, '');
 					}
 				};
 

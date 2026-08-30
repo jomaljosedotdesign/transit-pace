@@ -215,7 +215,7 @@
 			const [startFromCp, setStartFromCp] = useState(0);
 			const [regFlash, setRegFlash] = useState(false);
 			const stopRouteRef = React.useRef(stopRoute);
-			const handlePopStateRef = React.useRef(null);
+			const restoringHistoryRef = React.useRef(false);
 			
 			useEffect(() => { stopRouteRef.current = stopRoute; }, [stopRoute]);
 

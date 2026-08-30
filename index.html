@@ -222,15 +222,27 @@
 			useEffect(() => {
 				if(!active) return;
 
+				// Add a history entry while a route is active. When Back is pressed,
+				// ask first. If cancelled, move forward to restore the active-route
+				// entry instead of pushing a new entry during popstate. This keeps
+				// the Back guard reliable on Android back gestures as well as buttons.
 				window.history.pushState({activeRoute: true}, '');
+				restoringHistoryRef.current = false;
 
 				const handlePopState = () => {
-					// Immediately push state back before showing confirm
-					// so the stack is always maintained
-					window.history.pushState({activeRoute: true}, '');
+					if(restoringHistoryRef.current) {
+						restoringHistoryRef.current = false;
+						return;
+					}
+
 					const answer = confirm('Stop the current route and exit?');
 					if(answer) {
 						stopRouteRef.current();
+					} else {
+						// The Back action already moved one entry backward. Restore the
+						// active-route entry without adding another history entry.
+						restoringHistoryRef.current = true;
+						window.history.go(1);
 					}
 				};
 

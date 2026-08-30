@@ -220,22 +220,27 @@
 			useEffect(() => { stopRouteRef.current = stopRoute; }, [stopRoute]);
 
 			useEffect(() => {
-				if(!active) {
-					window.removeEventListener('popstate', handlePopStateRef.current);
-					return;
-				}
+				if(!active) return;
+
+				// Push two dummy states so we have buffer
 				window.history.pushState({activeRoute: true}, '');
+				window.history.pushState({activeRoute: true}, '');
+
 				const handlePopState = () => {
 					const answer = confirm('Stop the current route and exit?');
 					if(answer) {
 						stopRouteRef.current();
 					} else {
+						// Always maintain two states in stack
+						window.history.pushState({activeRoute: true}, '');
 						window.history.pushState({activeRoute: true}, '');
 					}
 				};
-				handlePopStateRef.current = handlePopState;
+
 				window.addEventListener('popstate', handlePopState);
-				return () => window.removeEventListener('popstate', handlePopState);
+				return () => {
+					window.removeEventListener('popstate', handlePopState);
+				};
 			}, [active]);
 
             useEffect(() => {

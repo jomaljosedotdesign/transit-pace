@@ -209,6 +209,24 @@
 			const gpsLastValidRef = React.useRef(null);
 			const [startFromCp, setStartFromCp] = useState(0);
 			const [regFlash, setRegFlash] = useState(false);
+			const stopRouteRef = React.useRef(stopRoute);
+			
+			useEffect(() => { stopRouteRef.current = stopRoute; }, [stopRoute]);
+
+			useEffect(() => {
+				if(!active) return;
+				window.history.pushState({activeRoute: true}, '');
+				const handlePopState = () => {
+					const answer = confirm('Stop the current route and exit?');
+					if(answer) {
+						stopRouteRef.current();
+					} else {
+						window.history.pushState({activeRoute: true}, '');
+					}
+				};
+				window.addEventListener('popstate', handlePopState);
+				return () => window.removeEventListener('popstate', handlePopState);
+			}, [active]);
 
             useEffect(() => {
                 const s = localStorage.getItem('routes');
